@@ -1,0 +1,1184 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Craft - Công cụ chỉnh sửa & sắp xếp trang PDF chuyên nghiệp</title>
+  <meta name="description" content="Trình biên tập PDF trực quan, mượt mà: kéo thả đổi thứ tự trang, chèn trang từ tệp khác, xóa trang và trích xuất PDF tốc độ cao.">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="stylesheet" href="app.css?v=2.3">
+  <style>
+    .search-group { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--border-subtle); border-radius: 8px; }
+    .search-group svg { color: var(--text-muted); flex-shrink: 0; }
+    .search-group input { width: 160px; }
+    .search-count { font-size: 0.74rem; color: var(--text-muted); white-space: nowrap; }
+    .page-card.search-hit { outline: 2px solid #22c55e; outline-offset: 2px; }
+    .page-card.search-current { outline: 3px solid #f59e0b; outline-offset: 2px; }
+  </style>
+  <!-- Thư viện xử lý PDF nội bộ (100% Offline, Non-blocking Defer) -->
+  <script src="vendor/pdf.min.js" defer></script>
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Navigation Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <div class="brand-logo">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+        </div>
+        <div class="brand-info">
+          <h1 class="brand-title">PDF Craft</h1>
+          <span class="brand-badge">Native Engine</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="doc-stats" id="docStats" style="display: none;">
+          <span class="stat-pill"><strong id="statPageCount">0</strong> trang</span>
+          <span class="stat-pill" id="statFileSize">0 KB</span>
+        </div>
+
+        <button class="btn btn-secondary" id="btnUploadNew" style="display: none;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          Mở tệp khác
+        </button>
+
+        <button class="btn btn-secondary" id="btnExportPdf" style="display: none;" title="Xuất file PDF giữ nguyên chất lượng gốc">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span>Xuất thường</span>
+        </button>
+
+        <button class="btn btn-primary" id="btnOpenCompressModal" style="display: none;" title="Mở bảng điều khiển nén & tối ưu hóa dung lượng">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+            <path d="M9 9h6v6H9z"></path>
+            <path d="M15 4v5M9 4v5M15 15v5M9 15v5"></path>
+          </svg>
+          <span>Nén & Xuất file</span>
+        </button>
+
+        <button class="btn btn-secondary" id="btnSaveProject" style="display: none;" title="Lưu toàn bộ phiên làm việc (trang, nhóm, xoay, ký, metadata) ra file .pdfcraft.json">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+            <polyline points="17 21 17 13 7 13 7 21"></polyline>
+            <polyline points="7 3 7 8 15 8"></polyline>
+          </svg>
+          <span>Lưu project</span>
+        </button>
+
+        <button class="btn btn-secondary" id="btnLoadProject" title="Mở file project .pdfcraft.json đã lưu để tiếp tục làm việc">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <span>Mở project</span>
+        </button>
+        <input type="file" id="projectFileInput" accept=".json,.pdfcraft.json,application/json" style="display: none;">
+
+        <button class="btn btn-quit" id="btnQuitApp" title="Đóng và thoát ứng dụng PDF Craft">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+            <line x1="12" y1="2" x2="12" y2="12"></line>
+          </svg>
+          <span>Thoát</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="app-main">
+      <!-- Upload Drop Zone (Visible when no PDF is loaded) -->
+      <section class="upload-container" id="uploadContainer">
+        <div class="upload-card" id="dropZone">
+          <div class="upload-icon-wrapper">
+            <svg class="upload-icon" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="12" y1="18" x2="12" y2="12"></line>
+              <polyline points="9 15 12 12 15 15"></polyline>
+            </svg>
+          </div>
+          <h2 class="upload-heading">Kéo & Thả các tệp PDF vào đây</h2>
+          <p class="upload-subtext">hoặc chọn một hoặc nhiều tệp từ máy tính để xem trước và sắp xếp các trang</p>
+          <label class="btn btn-primary btn-lg" for="fileInput">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            Chọn tệp PDF (hỗ trợ nhiều tệp)
+          </label>
+          <input type="file" id="fileInput" accept="application/pdf" multiple style="display: none;">
+          
+          <div class="upload-features">
+            <div class="feature-tag">📁 Nạp nhiều tệp cùng lúc</div>
+            <div class="feature-tag">✨ Kéo thả đổi vị trí siêu tốc</div>
+            <div class="feature-tag">🔍 Nhấn để xem chi tiết / mở tab mới</div>
+            <div class="feature-tag">✂️ Tách & Trích xuất trang</div>
+          </div>
+
+          <div class="upload-context-menu-box" id="contextMenuBox">
+            <button class="btn btn-outline-cm" id="btnToggleContextMenu" type="button" title="Đăng ký hoặc gỡ bỏ 'Open with PDF Craft' khỏi Menu chuột phải Windows">
+              <span class="cm-icon">🖱️</span>
+              <span id="txtContextMenu">Thêm vào Menu chuột phải Windows (<b>Open with PDF Craft</b>)</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Workspace Area (Visible when PDF is loaded) -->
+      <section class="workspace-container" id="workspaceContainer" style="display: none;">
+        <!-- Control Toolbar -->
+        <div class="toolbar">
+          <div class="toolbar-left">
+            <button class="btn btn-tool" id="btnSelectAll" title="Chọn tất cả các trang (Ctrl+A)">
+              <input type="checkbox" id="chkSelectAll" class="custom-checkbox">
+              <span id="txtSelectCount">Chọn tất cả</span>
+            </button>
+
+            <button class="btn btn-tool btn-danger" id="btnDeleteSelected" disabled title="Xóa các trang đã chọn (Delete)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              Xóa đã chọn
+            </button>
+
+            <button class="btn btn-tool" id="btnExtractSelected" disabled title="Trích xuất các trang đã chọn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="6" cy="6" r="3"></circle>
+                <circle cx="6" cy="18" r="3"></circle>
+                <line x1="20" y1="4" x2="8.12" y2="15.88"></line>
+                <line x1="14.47" y1="14.48" x2="20" y2="20"></line>
+                <line x1="8.12" y1="8.12" x2="12" y2="12"></line>
+              </svg>
+              Trích xuất đã chọn
+            </button>
+
+            <button class="btn btn-tool" id="btnRotateSelected" disabled title="Xoay các trang đã chọn thêm 90° (R)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+              </svg>
+              Xoay đã chọn 90°
+            </button>
+
+            <button class="btn btn-tool" id="btnReverseOrder" title="Đảo ngược toàn bộ thứ tự trang">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="17 1 21 5 17 9"></polyline>
+                <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
+                <polyline points="7 23 3 19 7 15"></polyline>
+                <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
+              </svg>
+              Đảo ngược thứ tự
+            </button>
+
+            <button class="btn btn-tool" id="btnUndo" disabled title="Hoàn tác thao tác gần nhất (Ctrl+Z)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 7v6h6"></path>
+                <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path>
+              </svg>
+              <span>Hoàn tác</span>
+            </button>
+
+            <button class="btn btn-tool" id="btnRedo" disabled title="Làm lại thao tác vừa hoàn tác (Ctrl+Y)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 7v6h-6"></path>
+                <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"></path>
+              </svg>
+              <span>Làm lại</span>
+            </button>
+
+            <button class="btn btn-tool btn-primary" id="btnOpenSignStudio" title="Ký điện tử & Đóng dấu chữ ký / con dấu lên tài liệu">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+                <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+                <path d="M2 2l7.586 7.586"></path>
+              </svg>
+              <span>Ký & Đóng dấu</span>
+            </button>
+          </div>
+
+          <div class="toolbar-right">
+            <!-- In-document text search -->
+            <div class="search-group" title="Tìm kiếm nội dung trong các trang (gõ không dấu vẫn ra)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              <input type="text" id="searchInput" class="form-input form-input-sm" placeholder="Tìm trong PDF... ( / )" autocomplete="off">
+              <span id="searchCount" class="search-count"></span>
+              <button type="button" class="btn btn-tool btn-sm btn-icon-only" id="btnSearchPrev" title="Kết quả trước (Shift+Enter)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              </button>
+              <button type="button" class="btn btn-tool btn-sm btn-icon-only" id="btnSearchNext" title="Kết quả sau (Enter)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </button>
+              <button type="button" class="btn btn-tool btn-sm btn-icon-only" id="btnSearchClear" title="Xóa tìm kiếm (Esc)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              </button>
+            </div>
+
+            <!-- Grid view size toggle -->
+            <div class="view-size-group" title="Kích cỡ hiển thị trang">
+              <button type="button" class="btn btn-tool btn-icon-only" id="btnViewCompact" title="Chế độ thu nhỏ (quản lý nhiều trang)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="7" height="7"></rect>
+                  <rect x="14" y="3" width="7" height="7"></rect>
+                  <rect x="3" y="14" width="7" height="7"></rect>
+                  <rect x="14" y="14" width="7" height="7"></rect>
+                </svg>
+              </button>
+              <button type="button" class="btn btn-tool btn-icon-only active" id="btnViewStandard" title="Chế độ tiêu chuẩn (khuyên dùng)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="8" height="8"></rect>
+                  <rect x="13" y="3" width="8" height="8"></rect>
+                  <rect x="3" y="13" width="8" height="8"></rect>
+                  <rect x="13" y="13" width="8" height="8"></rect>
+                </svg>
+              </button>
+              <button type="button" class="btn btn-tool btn-icon-only" id="btnViewLarge" title="Chế độ xem lớn">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+                </svg>
+              </button>
+            </div>
+
+            <!-- Metadata editor button -->
+            <button class="btn btn-tool" id="btnMetaEdit" title="Xem/sửa metadata (tiêu đề, tác giả...) áp dụng cho mọi file xuất ra">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                <line x1="7" y1="7" x2="7.01" y2="7"></line>
+              </svg>
+              Metadata
+            </button>
+
+            <!-- Insert from File button -->
+            <label class="btn btn-tool btn-accent" for="insertFileInput" title="Thêm một hoặc nhiều tệp PDF khác">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              <span>Thêm tệp PDF khác</span>
+            </label>
+            <input type="file" id="insertFileInput" accept="application/pdf" multiple style="display: none;">
+
+            <!-- Split all button -->
+            <button class="btn btn-tool" id="btnSplitAll" title="Tách tất cả các trang thành tệp riêng">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7"></rect>
+                <rect x="14" y="3" width="7" height="7"></rect>
+                <rect x="14" y="14" width="7" height="7"></rect>
+                <rect x="3" y="14" width="7" height="7"></rect>
+              </svg>
+              Tách từng trang
+            </button>
+
+            <!-- Export by groups button -->
+            <button class="btn btn-tool" id="btnExportGroups" title="Xuất từng nhóm thành một tệp PDF riêng">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                <polyline points="12 11 12 17"></polyline>
+                <polyline points="9 14 12 17 15 14"></polyline>
+              </svg>
+              Xuất theo nhóm
+            </button>
+          </div>
+        </div>
+
+        <!-- Group Management Bar -->
+        <div class="group-bar" id="groupBar">
+          <div class="group-bar-left">
+            <div class="group-bar-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+              <span>Nhóm trang:</span>
+            </div>
+            <div class="group-chips" id="groupChips">
+              <!-- Dynamically populated group chips -->
+            </div>
+            <button class="btn btn-tool btn-sm" id="btnNewGroup" title="Tạo nhóm trang mới">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              Tạo nhóm
+            </button>
+          </div>
+          <div class="group-bar-right">
+            <button class="btn btn-tool btn-sm" id="btnAssignGroup" disabled title="Gán các trang đang chọn vào một nhóm">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="8.5" cy="7" r="4"></circle>
+                <line x1="20" y1="8" x2="20" y2="14"></line>
+                <line x1="23" y1="11" x2="17" y2="11"></line>
+              </svg>
+              <span>Gán nhóm cho đã chọn</span>
+            </button>
+            <button class="btn btn-tool btn-sm btn-accent" id="btnMoveGroup" style="display: none;" title="Di chuyển toàn bộ các trang trong nhóm này">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="5 9 2 12 5 15"></polyline>
+                <polyline points="9 5 12 2 15 5"></polyline>
+                <polyline points="15 19 12 22 9 19"></polyline>
+                <polyline points="19 9 22 12 19 15"></polyline>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
+                <line x1="12" y1="2" x2="12" y2="22"></line>
+              </svg>
+              <span id="btnMoveGroupLabel">Di chuyển cả nhóm</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Instructional Subtitle & Shortcuts -->
+        <div class="grid-instruction">
+          <div class="instruction-main">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="16" x2="12" y2="12"></line>
+              <line x1="12" y1="8" x2="12.01" y2="8"></line>
+            </svg>
+            <span>Kéo thẻ để di chuyển vị trí. Giữ <strong>Shift + Click</strong> để chọn nhanh dải trang. Nhấp tên để sửa tên.</span>
+          </div>
+          <div class="shortcut-pills">
+            <span class="shortcut-badge"><kbd>Shift+Click</kbd> Chọn dải</span>
+            <span class="shortcut-badge"><kbd>Ctrl+A</kbd> Chọn hết</span>
+            <span class="shortcut-badge"><kbd>Ctrl+Z</kbd> Hoàn tác</span>
+            <span class="shortcut-badge"><kbd>Ctrl+Y</kbd> Làm lại</span>
+            <span class="shortcut-badge"><kbd>Del</kbd> Xóa</span>
+            <span class="shortcut-badge"><kbd>R</kbd> Xoay đã chọn</span>
+          </div>
+        </div>
+
+        <!-- Pages Grid -->
+        <div class="pages-grid" id="pagesGrid">
+          <!-- Dynamically generated page cards go here -->
+        </div>
+      </section>
+    </main>
+
+    <!-- Fullscreen Preview Modal -->
+    <div class="modal" id="previewModal">
+      <div class="modal-backdrop" id="modalBackdrop"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="modal-header-left">
+            <span class="modal-num-badge" id="modalPageNumBadge">#1</span>
+            <input type="text" class="modal-title-input" id="modalTitleInput" placeholder="Đặt tên cho trang này..." title="Nhấp để đổi tên trang">
+            <span class="modal-page-info" id="modalPageInfo"></span>
+          </div>
+          <div class="modal-header-actions">
+            <button class="btn btn-tool" id="modalPrevPage" title="Trang trước (Phím mũi tên trái)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
+            <button class="btn btn-tool" id="modalNextPage" title="Trang sau (Phím mũi tên phải)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </button>
+            <button class="btn btn-tool btn-accent" id="modalOpenTab" title="Mở trang này trong tab mới với trình đọc PDF">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+              <span>Mở tab mới</span>
+            </button>
+            <button class="btn btn-tool btn-primary" id="modalSignThisPage" title="Ký hoặc đóng dấu lên trang này">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+                <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+                <path d="M2 2l7.586 7.586"></path>
+              </svg>
+              <span>Ký trang này</span>
+            </button>
+            <button class="modal-close" id="modalClose" title="Đóng (Esc)">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="modal-body">
+          <div class="modal-spinner" id="modalSpinner" style="display: none;">
+            <div class="spinner-icon"></div>
+            <span>Đang tải trang sắc nét...</span>
+          </div>
+          <canvas id="modalCanvas"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create / Edit Group Modal -->
+    <div class="modal" id="groupModal">
+      <div class="modal-backdrop" id="groupModalBackdrop"></div>
+      <div class="modal-content" style="max-width: 440px;">
+        <div class="modal-header">
+          <h3 id="groupModalTitle">Tạo nhóm mới</h3>
+          <button class="modal-close" id="groupModalClose">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body modal-dialog-body">
+          <div class="form-group">
+            <label class="form-label" for="inputGroupName">Tên nhóm:</label>
+            <input type="text" id="inputGroupName" class="form-input" placeholder="Ví dụ: Hợp đồng, Hóa đơn, CMND..." maxlength="35">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Màu đại diện:</label>
+            <div class="color-picker-grid" id="colorPickerGrid">
+              <!-- Rendered colors -->
+            </div>
+          </div>
+          <div class="dialog-actions">
+            <button class="btn btn-tool" id="btnCancelGroupModal">Hủy</button>
+            <button class="btn btn-primary" id="btnSaveGroup">Lưu nhóm</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Assign Group to Selected Pages Modal -->
+    <div class="modal" id="assignGroupModal">
+      <div class="modal-backdrop" id="assignGroupBackdrop"></div>
+      <div class="modal-content" style="max-width: 440px;">
+        <div class="modal-header">
+          <h3 id="assignGroupTitle">Gán nhóm cho trang đã chọn</h3>
+          <button class="modal-close" id="assignGroupClose">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body modal-dialog-body">
+          <p class="dialog-subtext">Chọn các nhóm áp dụng cho các trang đang chọn (một trang có thể thuộc nhiều nhóm đồng thời):</p>
+          <div class="group-checklist" id="groupChecklist">
+            <!-- Rendered group checkboxes -->
+          </div>
+          <div class="dialog-actions">
+            <button class="btn btn-tool" id="btnCancelAssignModal">Hủy</button>
+            <button class="btn btn-primary" id="btnConfirmAssignGroup">Áp dụng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Move Entire Group Modal -->
+    <div class="modal" id="moveGroupModal">
+      <div class="modal-backdrop" id="moveGroupBackdrop"></div>
+      <div class="modal-content" style="max-width: 460px;">
+        <div class="modal-header">
+          <h3 id="moveGroupTitle">Di chuyển nhóm trang</h3>
+          <button class="modal-close" id="moveGroupClose">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body modal-dialog-body">
+          <p class="dialog-subtext" id="moveGroupDesc">Di chuyển đồng loạt tất cả các trang trong nhóm đến vị trí mới:</p>
+          <div class="move-options-list">
+            <button class="btn btn-tool move-option-btn" id="btnMoveGroupToStart">
+              <span>⬆️ Đưa cả nhóm lên đầu tài liệu (Trước vị trí #1)</span>
+            </button>
+            <button class="btn btn-tool move-option-btn" id="btnMoveGroupToEnd">
+              <span>⬇️ Đưa cả nhóm về cuối tài liệu</span>
+            </button>
+            <div class="move-custom-pos">
+              <label>Chuyển đến trước vị trí:</label>
+              <input type="number" id="inputMoveGroupTarget" min="1" class="form-input" style="width: 75px; text-align: center;" value="1">
+              <button class="btn btn-primary btn-sm" id="btnConfirmMoveGroup">Chuyển</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PDF Compression & Optimization Panel Modal -->
+    <div class="modal" id="compressModal">
+      <div class="modal-backdrop" id="compressModalBackdrop"></div>
+      <div class="modal-content" style="max-width: 680px;">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div class="compress-header-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+                <path d="M9 9h6v6H9z"></path>
+                <path d="M15 4v5M9 4v5M15 15v5M9 15v5"></path>
+              </svg>
+            </div>
+            <div>
+              <h3 style="margin: 0; font-size: 1.12rem;">Bảng điều khiển Nén & Tối ưu hóa PDF</h3>
+              <span style="font-size: 0.75rem; color: var(--text-muted);">Tối ưu dung lượng & chất lượng xuất file</span>
+            </div>
+          </div>
+          <button class="modal-close" id="compressModalClose" title="Đóng (Esc)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-body modal-dialog-body" style="max-height: 78vh; overflow-y: auto; overflow-x: hidden;">
+          <!-- Presets Bar -->
+          <div class="compress-presets-bar">
+            <span class="compress-presets-label">Cấu hình nhanh:</span>
+            <div class="compress-presets-list">
+              <button type="button" class="btn btn-tool btn-sm active" id="presetBalanced" data-tooltip="DPI 150, Chất lượng 75%, giữ nguyên màu. Cân bằng tối ưu kích thước và độ nét.">
+                <span>⚖️ Cân bằng</span>
+                <span class="help-tip" data-tooltip="DPI 150, Chất lượng 75%, giữ nguyên màu. Cân bằng tối ưu kích thước và độ nét.">?</span>
+              </button>
+              <button type="button" class="btn btn-tool btn-sm" id="presetMaxCompress" data-tooltip="DPI 96, Chất lượng 40%, thang xám. Dung lượng siêu nhỏ cho tệp nhẹ nhất.">
+                <span>🚀 Nén tối đa</span>
+                <span class="help-tip" data-tooltip="DPI 96, Chất lượng 40%, thang xám. Dung lượng siêu nhỏ cho tệp nhẹ nhất.">?</span>
+              </button>
+              <button type="button" class="btn btn-tool btn-sm" id="presetHighQuality" data-tooltip="DPI 300, Chất lượng 90%, giữ nguyên màu. Thích hợp cho in ấn và trình chiếu chất lượng cao.">
+                <span>🎨 Nét cao</span>
+                <span class="help-tip" data-tooltip="DPI 300, Chất lượng 90%, giữ nguyên màu. Thích hợp cho in ấn và trình chiếu chất lượng cao.">?</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Primary Setting 1: DPI -->
+          <div class="compress-setting-card">
+            <div class="compress-setting-header">
+              <div class="compress-setting-title">
+                <span class="setting-num">1</span>
+                <div style="display: flex; align-items: center;">
+                  <strong>Độ phân giải (DPI)</strong>
+                  <span class="help-tip" data-tooltip="DPI (Dots Per Inch) quyết định mật độ điểm ảnh của trang. 72-96 DPI phù hợp web/email; 150 DPI cân bằng tối ưu; 300 DPI cho in ấn sắc nét.">?</span>
+                </div>
+              </div>
+              <span class="setting-val-badge" id="dpiDisplayValue">150 DPI</span>
+            </div>
+
+            <div class="dpi-slider-wrapper">
+              <input type="range" id="dpiRange" min="72" max="300" step="1" value="150" class="compress-range-slider">
+              <div class="dpi-quick-btns">
+                <button type="button" class="dpi-btn" data-dpi="72">72 (Web)</button>
+                <button type="button" class="dpi-btn" data-dpi="96">96 (Văn phòng)</button>
+                <button type="button" class="dpi-btn active" data-dpi="150">150 (Khuyên dùng)</button>
+                <button type="button" class="dpi-btn" data-dpi="200">200 (Nét)</button>
+                <button type="button" class="dpi-btn" data-dpi="300">300 (In ấn)</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Primary Setting 2: Image Quality % -->
+          <div class="compress-setting-card">
+            <div class="compress-setting-header">
+              <div class="compress-setting-title">
+                <span class="setting-num">2</span>
+                <div style="display: flex; align-items: center;">
+                  <strong>Chất lượng ảnh (Quality)</strong>
+                  <span class="help-tip" data-tooltip="Mức nén ảnh JPEG: dưới 40% cho dung lượng siêu nhỏ; 70-85% cân bằng tối ưu; 90-100% giữ nguyên chất lượng ảnh gốc.">?</span>
+                </div>
+              </div>
+              <span class="setting-val-badge" id="qualityDisplayValue">75%</span>
+            </div>
+
+            <div class="quality-slider-wrapper">
+              <input type="range" id="qualityRange" min="15" max="100" step="1" value="75" class="compress-range-slider">
+              <div class="range-labels">
+                <span>15% (Siêu nén)</span>
+                <span id="qualityStatusText" style="color: #a5b4fc; font-weight: 600;">75% (Cân bằng tối ưu)</span>
+                <span>100% (Gốc)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Advanced Options (Collapsible Details/Accordion) -->
+          <details class="advanced-details" id="advancedCompressDetails">
+            <summary class="advanced-summary">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+                <span>Tùy chọn tối ưu hóa nâng cao (14 tính năng)</span>
+              </div>
+              <span class="advanced-badge">Chi tiết ▼</span>
+            </summary>
+
+            <div class="advanced-grid">
+              <label class="adv-opt-label">
+                <input type="checkbox" id="optRemoveThumbnails" class="custom-checkbox" checked>
+                <span>Bỏ hình thu nhỏ</span>
+                <span class="help-tip" data-tooltip="Xóa các ảnh thumbnail nhúng sẵn trong file vốn chiếm dung lượng thừa vì trình xem hiện đại tự sinh lại tức thì.">?</span>
+              </label>
+
+              <label class="adv-opt-label">
+                <input type="checkbox" id="optDedupStreams" class="custom-checkbox" checked>
+                <span>Khử trùng lặp luồng</span>
+                <span class="help-tip" data-tooltip="Dò tìm và gộp các luồng dữ liệu (object streams) giống nhau trong tài liệu để tránh lưu trùng lặp.">?</span>
+              </label>
+
+              <label class="adv-opt-label">
+                <input type="checkbox" id="optRasterizeHeavy" class="custom-checkbox" checked>
+                <span>Raster hóa đồ họa</span>
+                <span class="help-tip" data-tooltip="Chuyển các trang có vector phức tạp và hình học nặng thành ảnh nén chất lượng cao ở DPI được chọn, giảm mạnh kích thước.">?</span>
+              </label>
+
+              <label class="adv-opt-label">
+                <input type="checkbox" id="optSubsetFonts" class="custom-checkbox" checked>
+                <span>Giảm font nhúng</span>
+                <span class="help-tip" data-tooltip="Loại bỏ các bộ font đồ sộ nhúng thừa, chỉ giữ lại bảng mã ký tự thực tế hoặc chuyển sang font chuẩn.">?</span>
+              </label>
+
+              <label class="adv-opt-label">
+                <input type="checkbox" id="optModernCompression" class="custom-checkbox" checked>
+                <span>Nén ảnh hiện đại</span>
+                <span class="help-tip" data-tooltip="Sử dụng thuật toán mã hóa DCT/JPEG tối ưu hóa bảng lượng tử hóa để ảnh nhỏ gọn nhất mà mắt người không nhận ra suy giảm.">?</span>
+              </label>
+
+              <label class="adv-opt-label">
+                <input type="checkbox" id="optGrayscale" class="custom-checkbox">
+                <span>Chuyển sang thang xám</span>
+                <span class="help-tip" data-tooltip="Chuyển toàn bộ hình ảnh sang đen trắng / đơn sắc, loại bỏ 2 kênh màu giúp giảm thêm tới 30-40% dung lượng.">?</span>
+              </label>
+
+              <label class="adv-opt-label">
+                <input type="checkbox" id="optMaxFlate" class="custom-checkbox" checked>
+                <span>Nén Flate tối đa</span>
+                <span class="help-tip" data-tooltip="Nén các đối tượng và bảng tham chiếu chéo (Cross-reference Streams) chuẩn PDF 1.5+ để thu nhỏ tệp tối đa.">?</span>
+              </label>
+
+              <label class="adv-opt-label">
+                <input type="checkbox" id="optFlattenForms" class="custom-checkbox" checked>
+                <span>Phẳng hóa biểu mẫu</span>
+                <span class="help-tip" data-tooltip="Hợp nhất các trường form (AcroForms) trực tiếp vào nội dung trang, xóa bỏ cấu trúc trường nhập liệu thừa.">?</span>
+              </label>
+
+              <label class="adv-opt-label">
+                <input type="checkbox" id="optRemoveOutputIntents" class="custom-checkbox" checked>
+                <span>Bỏ điều kiện đầu ra</span>
+                <span class="help-tip" data-tooltip="Xóa bỏ các hồ sơ màu ICC và OutputIntents cồng kềnh dùng cho nhà in công nghiệp không cần thiết cho hiển thị thông thường.">?</span>
+              </label>
+
+              <label class="adv-opt-label">
+                <input type="checkbox" id="optRemoveAttachments" class="custom-checkbox" checked>
+                <span>Bỏ tệp đính kèm</span>
+                <span class="help-tip" data-tooltip="Gỡ bỏ các tệp nhúng đính kèm ẩn bên trong tài liệu PDF (EmbeddedFiles/Names).">?</span>
+              </label>
+
+              <label class="adv-opt-label">
+                <input type="checkbox" id="optRemoveAnnotations" class="custom-checkbox" checked>
+                <span>Bỏ chú thích & vẽ</span>
+                <span class="help-tip" data-tooltip="Xóa các ghi chú, khung vẽ, liên kết nội bộ thừa không cần thiết trên trang.">?</span>
+              </label>
+
+              <label class="adv-opt-label">
+                <input type="checkbox" id="optRemoveOutlines" class="custom-checkbox" checked>
+                <span>Bỏ phác thảo bookmark</span>
+                <span class="help-tip" data-tooltip="Xóa cây mục lục đánh dấu trang (Bookmarks/Outlines) để tinh giản cấu trúc tài liệu.">?</span>
+              </label>
+
+              <label class="adv-opt-label">
+                <input type="checkbox" id="optRemoveMetadata" class="custom-checkbox" checked>
+                <span>Bỏ siêu dữ liệu</span>
+                <span class="help-tip" data-tooltip="Xóa sạch thông tin tác giả, tiêu đề, phần mềm tạo file, thời gian và dữ liệu XMP ẩn.">?</span>
+              </label>
+
+              <label class="adv-opt-label">
+                <input type="checkbox" id="optRemoveStructureTree" class="custom-checkbox" checked>
+                <span>Bỏ cấu trúc tài liệu</span>
+                <span class="help-tip" data-tooltip="Loại bỏ cây cấu trúc tài liệu trợ năng (StructTreeRoot) giúp file nhẹ hơn đáng kể.">?</span>
+              </label>
+            </div>
+          </details>
+
+          <!-- Compression Progress & Results Bar -->
+          <div class="compress-progress-box" id="compressProgressBox" style="display: none;">
+            <div class="compress-progress-info">
+              <span id="compressProgressText">Đang tối ưu và nén các trang...</span>
+              <span id="compressProgressPercent">0%</span>
+            </div>
+            <div class="compress-progress-track">
+              <div class="compress-progress-fill" id="compressProgressFill" style="width: 0%;"></div>
+            </div>
+          </div>
+
+          <!-- Bottom Action Buttons -->
+          <div class="dialog-actions" style="margin-top: 14px;">
+            <button type="button" class="btn btn-tool" id="btnCancelCompress">Hủy</button>
+            <button type="button" class="btn btn-primary btn-lg" id="btnExecuteCompress" style="padding: 10px 24px;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Bắt đầu Nén & Tải về</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Digital Signature & Stamp Placement Studio Modal -->
+    <div class="modal modal-xl" id="signModal">
+      <div class="modal-backdrop" id="signModalBackdrop"></div>
+      <div class="modal-content sign-studio-content">
+        <div class="modal-header">
+          <div class="modal-header-left">
+            <span class="sign-brand-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+                <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+                <path d="M2 2l7.586 7.586"></path>
+              </svg>
+            </span>
+            <h3>Ký Điện Tử & Đóng Dấu Chữ Ký</h3>
+            <span class="sign-doc-info" id="signDocInfo"></span>
+          </div>
+          <div class="modal-header-actions">
+            <button class="modal-close" id="signModalClose" title="Đóng (Esc)">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="sign-studio-body">
+          <!-- Left Control Panel: Tạo chữ ký / con dấu -->
+          <div class="sign-panel">
+            <div class="sign-tabs">
+              <button type="button" class="sign-tab active" data-tab="upload" id="tabUpload" title="Tải ảnh và quản lý thư viện con dấu">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <span>Thư viện dấu</span>
+              </button>
+              <button type="button" class="sign-tab" data-tab="type" id="tabType" title="Gõ tên tạo chữ ký viết tay nghệ thuật">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="4 7 4 4 20 4 20 7"></polyline>
+                  <line x1="9" y1="20" x2="15" y2="20"></line>
+                  <line x1="12" y1="4" x2="12" y2="20"></line>
+                </svg>
+                <span>Gõ chữ ký</span>
+              </button>
+              <button type="button" class="sign-tab" data-tab="official" id="tabOfficial" title="Tạo con dấu tên, chức danh và nghiệp vụ chuẩn Việt Nam">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+                  <line x1="7" y1="8" x2="17" y2="8"></line>
+                  <line x1="7" y1="12" x2="17" y2="12"></line>
+                  <line x1="7" y1="16" x2="13" y2="16"></line>
+                </svg>
+                <span>Dấu chức danh</span>
+              </button>
+            </div>
+
+            <!-- Tab 1: Tải ảnh & Thư viện con dấu đa tệp -->
+            <div class="sign-tab-content active" id="paneUpload">
+              <!-- Upload Zone supporting multiple files -->
+              <div class="sign-upload-zone" id="signUploadDrop">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="color: var(--primary);">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <p>Kéo thả nhiều ảnh con dấu / chữ ký vào đây</p>
+                <span>Hỗ trợ PNG trong suốt, JPG, WebP (chọn nhiều ảnh)</span>
+                <input type="file" id="signImageInput" accept="image/png,image/jpeg,image/webp" multiple style="display: none;">
+                <label for="signImageInput" class="btn btn-secondary btn-sm" style="margin-top: 8px; cursor: pointer;">
+                  + Tải ảnh con dấu từ máy tính
+                </label>
+              </div>
+
+              <!-- Stamp Library Grid -->
+              <div class="stamp-library-section">
+                <div class="stamp-library-header">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <strong style="font-size: 0.84rem; color: var(--text-primary);">Thư viện con dấu đã lưu:</strong>
+                    <span class="sign-stamp-badge" id="libStampCountBadge">0 dấu</span>
+                  </div>
+                  <button type="button" class="btn-text-danger" id="btnClearStampLibrary" style="font-size: 0.74rem; cursor: pointer;" title="Xóa tất cả con dấu trong thư viện">Xóa thư viện</button>
+                </div>
+                <div class="stamp-library-grid" id="stampLibraryGrid">
+                  <div class="stamp-lib-empty">Chưa có ảnh con dấu nào trong thư viện. Bạn có thể tải lên nhiều ảnh (dấu công ty, dấu chức danh, chữ ký scan...) để dùng lại bất kỳ lúc nào!</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab 3: Gõ tên tạo chữ ký viết tay nghệ thuật -->
+            <div class="sign-tab-content" id="paneType" style="display: none;">
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label" for="signTypeName">Nhập họ và tên:</label>
+                <input type="text" id="signTypeName" class="form-input" placeholder="Ví dụ: Nguyễn Văn An" maxlength="40">
+              </div>
+
+              <div class="sign-type-styles">
+                <label class="form-label" style="margin-bottom: 6px;">Chọn kiểu nét ký nghệ thuật:</label>
+                <div class="sign-font-options" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                  <div class="sign-font-card active" data-font="dancing" title="Dancing Script: Nét thanh thoát, mềm mại">
+                    <span class="sign-font-name-tag">Dancing Script</span>
+                    <span class="sign-font-sample" style="font-family: 'Dancing Script', cursive;">Nguyễn Văn An</span>
+                  </div>
+                  <div class="sign-font-card" data-font="greatvibes" title="Great Vibes: Nét uốn lượn quý phái">
+                    <span class="sign-font-name-tag">Great Vibes</span>
+                    <span class="sign-font-sample" style="font-family: 'Great Vibes', cursive;">Nguyễn Văn An</span>
+                  </div>
+                  <div class="sign-font-card" data-font="alexbrush" title="Alex Brush: Chữ ký doanh nhân">
+                    <span class="sign-font-name-tag">Alex Brush</span>
+                    <span class="sign-font-sample" style="font-family: 'Alex Brush', cursive;">Nguyễn Văn An</span>
+                  </div>
+                  <div class="sign-font-card" data-font="caveat" title="Caveat: Nét ký tự nhiên như bút bi">
+                    <span class="sign-font-name-tag">Caveat</span>
+                    <span class="sign-font-sample" style="font-family: 'Caveat', cursive;">Nguyễn Văn An</span>
+                  </div>
+                  <div class="sign-font-card" data-font="pacifico" style="grid-column: span 2;" title="Pacifico: Nét bút lông cá tính">
+                    <span class="sign-font-name-tag">Pacifico</span>
+                    <span class="sign-font-sample" style="font-family: 'Pacifico', cursive;">Nguyễn Văn An</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="sign-type-actions-row" style="margin-top: 12px; display: flex; justify-content: space-between; align-items: center;">
+                <div class="sign-color-picker" style="display: flex; align-items: center; gap: 8px;">
+                  <label class="form-label" style="margin: 0;">Màu mực:</label>
+                  <button type="button" class="sign-color-dot active" data-type-color="#0f172a" style="background: #0f172a;" title="Mực Đen"></button>
+                  <button type="button" class="sign-color-dot" data-type-color="#1d4ed8" style="background: #1d4ed8;" title="Mực Xanh Ký"></button>
+                  <button type="button" class="sign-color-dot" data-type-color="#dc2626" style="background: #dc2626;" title="Mực Đỏ Dấu"></button>
+                </div>
+                <button type="button" class="btn btn-tool btn-sm" id="btnSaveTypeToLib" title="Lưu chữ ký kiểu này vào thư viện để dùng lại">💾 Lưu thư viện</button>
+              </div>
+            </div>
+
+            <!-- Tab 3: Tạo con dấu tên / chức danh / nghiệp vụ chuẩn Việt Nam -->
+            <div class="sign-tab-content" id="paneOfficial" style="display: none;">
+              <!-- Quick Presets Categorized Chips -->
+              <div class="official-presets-bar">
+                <span style="font-size: 0.78rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 2px;">Mẫu dấu nghiệp vụ nhanh:</span>
+                <div class="official-presets-group">
+                  <span class="official-group-tag">Cá nhân & Đơn vị:</span>
+                  <div class="official-presets-list">
+                    <button type="button" class="btn-preset-chip active" data-preset="title_name">Chức danh + Tên</button>
+                    <button type="button" class="btn-preset-chip" data-preset="name_only">Dấu tên 1 dòng</button>
+                    <button type="button" class="btn-preset-chip" data-preset="business_tax">Dấu vuông MST (3 dòng)</button>
+                    <button type="button" class="btn-preset-chip" data-preset="round_stamp">Dấu tròn nội bộ</button>
+                  </div>
+                </div>
+                <div class="official-presets-group">
+                  <span class="official-group-tag">Tài chính & Kho vận:</span>
+                  <div class="official-presets-list">
+                    <button type="button" class="btn-preset-chip" data-preset="paid">ĐÃ THU TIỀN</button>
+                    <button type="button" class="btn-preset-chip" data-preset="cash_out">ĐÃ CHI TIỀN</button>
+                    <button type="button" class="btn-preset-chip" data-preset="invoice_paid">ĐÃ THANH TOÁN</button>
+                    <button type="button" class="btn-preset-chip" data-preset="stock_in">ĐÃ NHẬP KHO</button>
+                    <button type="button" class="btn-preset-chip" data-preset="stock_out">ĐÃ XUẤT KHO</button>
+                    <button type="button" class="btn-preset-chip" data-preset="void">HỦY (VOID)</button>
+                  </div>
+                </div>
+                <div class="official-presets-group">
+                  <span class="official-group-tag">Hành chính & Duyệt:</span>
+                  <div class="official-presets-list">
+                    <button type="button" class="btn-preset-chip" data-preset="copy">SAO Y BẢN CHÍNH</button>
+                    <button type="button" class="btn-preset-chip" data-preset="duplicate">BẢN SAO</button>
+                    <button type="button" class="btn-preset-chip" data-preset="doc_incoming">CÔNG VĂN ĐẾN</button>
+                    <button type="button" class="btn-preset-chip" data-preset="secret">MẬT / HỎA TỐC</button>
+                    <button type="button" class="btn-preset-chip" data-preset="checked">ĐÃ ĐỐI CHIẾU</button>
+                    <button type="button" class="btn-preset-chip" data-preset="approved">GIÁM ĐỐC ĐÃ DUYỆT</button>
+                    <button type="button" class="btn-preset-chip" data-preset="phone">BÁN HÀNG QUA ĐT</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Title & Name Form Inputs -->
+              <div class="form-group" id="groupOfficialTitle" style="margin-bottom: 8px;">
+                <label class="form-label" for="stampOfficialTitle" id="lblOfficialTitle">Chức danh / Dòng trên (In hoa):</label>
+                <input type="text" id="stampOfficialTitle" class="form-input" placeholder="Ví dụ: GIÁM ĐỐC / TRƯỞNG PHÒNG" value="GIÁM ĐỐC">
+              </div>
+
+              <div class="form-group" style="margin-bottom: 8px;">
+                <label class="form-label" for="stampOfficialName" id="lblOfficialName">Họ và tên / Nội dung chính:</label>
+                <input type="text" id="stampOfficialName" class="form-input" placeholder="Ví dụ: NGUYỄN VĂN AN" value="NGUYỄN VĂN AN">
+              </div>
+
+              <div class="form-group" id="groupOfficialExtra" style="margin-bottom: 8px; display: none;">
+                <label class="form-label" for="stampOfficialExtra" id="lblOfficialExtra">Dòng 3 (Địa chỉ / SĐT / Mã số thuế):</label>
+                <input type="text" id="stampOfficialExtra" class="form-input" placeholder="Ví dụ: ĐC: 123 Lê Lợi, Q.1, TP.HCM - ĐT: 0908..." value="">
+              </div>
+
+              <!-- Date Stamp Settings -->
+              <div class="official-date-settings" style="margin-bottom: 10px; padding: 8px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 6px;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                  <label class="form-checkbox" style="font-size: 0.78rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; margin: 0;">
+                    <input type="checkbox" id="chkOfficialDate">
+                    <span>Kèm ngày tháng tự động</span>
+                  </label>
+                  <select id="selOfficialDateFormat" class="form-select form-select-sm" style="font-size: 0.72rem; padding: 2px 6px; display: none; width: auto;">
+                    <option value="full">Ngày DD tháng MM năm YYYY</option>
+                    <option value="slash">DD / MM / YYYY</option>
+                    <option value="dash">DD - MM - YYYY</option>
+                  </select>
+                </div>
+                <div id="rowOfficialDateInput" style="display: none; margin-top: 6px;">
+                  <input type="date" id="inputOfficialDate" class="form-input form-input-sm" style="font-size: 0.76rem; padding: 3px 8px;">
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                <div class="form-group" style="flex: 1; margin: 0;">
+                  <label class="form-label" for="stampBorderType">Kiểu viền / Khung:</label>
+                  <select id="stampBorderType" class="form-select" style="width: 100%;">
+                    <option value="single" selected>Viền đơn sắc nét (Chuẩn)</option>
+                    <option value="double">Viền kép đôi</option>
+                    <option value="rounded">Bo góc tròn</option>
+                    <option value="round">Dấu tròn 2 vòng (Nội bộ)</option>
+                    <option value="none">Không viền (Chữ nổi)</option>
+                  </select>
+                </div>
+                <div class="form-group" style="margin: 0;">
+                  <label class="form-label">Màu mực:</label>
+                  <div class="sign-color-picker" style="padding-top: 4px;">
+                    <button type="button" class="sign-color-dot active" data-official-color="#c81e1e" style="background: #c81e1e;" title="Đỏ son mộc thật (Chuẩn)"></button>
+                    <button type="button" class="sign-color-dot" data-official-color="#dc2626" style="background: #dc2626;" title="Đỏ tươi"></button>
+                    <button type="button" class="sign-color-dot" data-official-color="#003399" style="background: #003399;" title="Xanh Cửu Long"></button>
+                    <button type="button" class="sign-color-dot" data-official-color="#1d4ed8" style="background: #1d4ed8;" title="Xanh dương"></button>
+                    <button type="button" class="sign-color-dot" data-official-color="#0f172a" style="background: #0f172a;" title="Mực Đen"></button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Realistic Grunge & Angle Toggles -->
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 0.76rem;">
+                <label class="form-checkbox" style="cursor: pointer; display: flex; align-items: center; gap: 6px; margin: 0;" title="Tạo hiệu ứng mực xốp ngấm vào sợi giấy như đóng mộc thật">
+                  <input type="checkbox" id="chkOfficialGrunge" checked>
+                  <span style="color: var(--text-secondary);">Vân mực mộc tự nhiên</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <label for="rngOfficialAngle" style="color: var(--text-secondary); margin: 0;" title="Xoay nhẹ con dấu như đóng tay ngoài đời">Nghiêng:</label>
+                  <input type="range" id="rngOfficialAngle" min="-3" max="3" step="0.5" value="0" style="width: 70px;">
+                  <span id="lblOfficialAngle" style="font-size: 0.72rem; color: #a5b4fc; min-width: 20px;">0°</span>
+                </div>
+              </div>
+
+              <!-- Official Stamp Live Preview -->
+              <div class="official-preview-container">
+                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                  <span style="font-size: 0.74rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase;">Xem trước con dấu hành chính:</span>
+                  <div style="display: flex; gap: 6px;">
+                    <button type="button" class="btn btn-tool btn-sm" id="btnSaveOfficialToLib" title="Lưu mẫu con dấu này vào thư viện để dùng lại">💾 Lưu thư viện</button>
+                  </div>
+                </div>
+                <div class="official-stamp-display" id="officialStampDisplay">
+                  <div class="official-stamp-box official-border-single" id="officialStampBox" style="color: #c81e1e; border-color: #c81e1e;">
+                    <div class="official-stamp-title" id="previewOfficialTitle">GIÁM ĐỐC</div>
+                    <div class="official-stamp-name" id="previewOfficialName">NGUYỄN VĂN AN</div>
+                    <div class="official-stamp-extra" id="previewOfficialExtra" style="display: none;"></div>
+                    <div class="official-stamp-date" id="previewOfficialDate" style="display: none;"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Stamp Placement Properties -->
+            <div class="sign-props-section">
+              <div class="form-group" style="margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <label class="form-label" for="signOpacity" style="margin: 0;">Độ đậm nhạt (Opacity):</label>
+                  <span id="signOpacityVal" style="font-size: 0.8rem; font-weight: 700; color: #a5b4fc;">100%</span>
+                </div>
+                <input type="range" id="signOpacity" min="20" max="100" value="100" class="form-range" style="width: 100%;">
+              </div>
+
+              <button type="button" class="btn btn-primary" id="btnPlaceStampOnPage" style="width: 100%; justify-content: center; padding: 11px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                <span>Đưa con dấu / chữ ký lên trang</span>
+              </button>
+            </div>
+
+            <!-- Page Stamps List on Current Page -->
+            <div class="sign-stamps-summary">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span class="sign-summary-title">Con dấu trên trang này:</span>
+                <span class="sign-stamp-badge" id="signStampCountBadge">0 dấu</span>
+              </div>
+              <div class="sign-stamps-list" id="signStampsList">
+                <div class="sign-empty-hint">Chưa có chữ ký hoặc con dấu nào trên trang này.</div>
+              </div>
+              <button type="button" class="btn btn-tool btn-danger btn-sm" id="btnClearPageStamps" style="display: none; width: 100%; margin-top: 8px; justify-content: center;">
+                Xóa tất cả dấu trên trang này
+              </button>
+            </div>
+          </div>
+
+          <!-- Right Stage: Vùng hiển thị trang tương tác -->
+          <div class="sign-stage-area">
+            <!-- Stage Navigation Bar with Zoom Controls -->
+            <div class="sign-stage-nav">
+              <div class="sign-nav-left">
+                <button type="button" class="btn btn-tool btn-sm" id="btnSignPrevPage" title="Trang trước">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                </button>
+                <div class="sign-page-select-wrapper">
+                  <span>Trang</span>
+                  <select id="signPageSelect" class="form-select"></select>
+                </div>
+                <button type="button" class="btn btn-tool btn-sm" id="btnSignNextPage" title="Trang sau">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </button>
+              </div>
+
+              <!-- Enhanced Stage Zoom Bar with Editable % & Preset Dropdown -->
+              <div class="sign-stage-zoom-bar">
+                <button type="button" class="btn btn-tool btn-sm btn-icon-only" id="btnStageZoomOut" title="Thu nhỏ sân khấu (-)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                </button>
+                <div class="stage-zoom-input-wrap" id="stageZoomWrap">
+                  <input type="text" id="inputStageZoom" class="stage-zoom-input" value="100%" title="Gõ tỷ lệ % rồi nhấn Enter">
+                  <button type="button" class="stage-zoom-dropdown-btn" id="btnStageZoomPresets" title="Chọn tỷ lệ thu phóng">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </button>
+                  <div class="stage-zoom-menu" id="stageZoomMenu" style="display: none;">
+                    <div class="zoom-menu-item" data-zoom="0.5">50%</div>
+                    <div class="zoom-menu-item" data-zoom="0.75">75%</div>
+                    <div class="zoom-menu-item active" data-zoom="1.0">100% (Chuẩn)</div>
+                    <div class="zoom-menu-item" data-zoom="1.25">125%</div>
+                    <div class="zoom-menu-item" data-zoom="1.5">150%</div>
+                    <div class="zoom-menu-item" data-zoom="2.0">200%</div>
+                    <div class="zoom-menu-divider"></div>
+                    <div class="zoom-menu-item" data-zoom="fit">Vừa trang</div>
+                    <div class="zoom-menu-item" data-zoom="fit-width">Vừa chiều rộng</div>
+                  </div>
+                </div>
+                <button type="button" class="btn btn-tool btn-sm btn-icon-only" id="btnStageZoomIn" title="Phóng to sân khấu (+)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                </button>
+                <button type="button" class="btn btn-tool btn-sm" id="btnStageZoomFit" title="Vừa toàn bộ trang">Vừa trang</button>
+                <button type="button" class="btn btn-tool btn-sm" id="btnStageZoomFitWidth" title="Vừa chiều rộng trang">Vừa chiều ngang</button>
+              </div>
+
+              <div class="sign-nav-right">
+                <label class="adv-opt-label" style="font-size: 0.8rem; margin: 0; cursor: pointer;">
+                  <input type="checkbox" id="chkApplyAllPages" class="custom-checkbox">
+                  <span>Áp dụng con dấu này cho tất cả các trang</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Interactive Stage Canvas Wrapper -->
+            <div class="sign-stage-viewport" id="signStageViewport">
+              <!-- Floating Mini Toolbar for selected stamp -->
+              <div class="stamp-floating-toolbar" id="stampFloatingToolbar" style="display: none;">
+                <button type="button" class="stamp-float-btn" id="btnFloatRotZero" title="Đặt lại góc thẳng 0°">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><polyline points="3 3 3 8 8 8"></polyline></svg>
+                  <span>0°</span>
+                </button>
+                <button type="button" class="stamp-float-btn" id="btnFloatDuplicate" title="Nhân bản con dấu (Ctrl+D)">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  <span>Nhân bản</span>
+                </button>
+                <div class="stamp-float-divider"></div>
+                <button type="button" class="stamp-float-btn stamp-float-btn-danger" id="btnFloatDelete" title="Xóa con dấu (Delete)">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                  <span>Xóa</span>
+                </button>
+              </div>
+
+              <div class="sign-stage-container" id="signStageContainer">
+                <canvas id="signStageCanvas"></canvas>
+                <div class="sign-stage-overlay" id="signStageOverlay">
+                  <!-- Draggable, Resizable & Rotatable Stamp Boxes are injected here dynamically -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="modal-footer sign-modal-footer">
+          <div class="sign-footer-hint">
+            💡 <strong>Mẹo:</strong> Nhấp vào con dấu để chỉnh sửa • Phím mũi tên vi chỉnh <code>1px</code> • Phím <code>Delete</code> để xóa • <code>Ctrl + Cuộn chuột</code> để thu phóng.
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button type="button" class="btn btn-tool" id="btnCancelSign">Hủy</button>
+            <button type="button" class="btn btn-primary" id="btnSaveSignDone">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              <span>Xác nhận & Lưu chữ ký</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Document Metadata Editor Modal -->
+    <div class="modal" id="metaModal">
+      <div class="modal-backdrop" id="metaModalBackdrop"></div>
+      <div class="modal-content" style="max-width: 460px;">
+        <div class="modal-header">
+          <h3>Metadata tài liệu (áp dụng khi xuất file)</h3>
+          <button class="modal-close" id="metaModalClose">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body modal-dialog-body">
+          <p class="dialog-subtext">Để trống trường nào thì giữ nguyên giá trị gốc của trường đó.</p>
+          <div class="form-group" style="margin-bottom: 8px;">
+            <label class="form-label" for="inputMetaTitle">Tiêu đề (Title):</label>
+            <input type="text" id="inputMetaTitle" class="form-input" placeholder="Ví dụ: Báo cáo Q3 2026" maxlength="200">
+          </div>
+          <div class="form-group" style="margin-bottom: 8px;">
+            <label class="form-label" for="inputMetaAuthor">Tác giả (Author):</label>
+            <input type="text" id="inputMetaAuthor" class="form-input" placeholder="Ví dụ: Nguyễn Văn An" maxlength="200">
+          </div>
+          <div class="form-group" style="margin-bottom: 8px;">
+            <label class="form-label" for="inputMetaSubject">Chủ đề (Subject):</label>
+            <input type="text" id="inputMetaSubject" class="form-input" placeholder="Ví dụ: Tài chính" maxlength="200">
+          </div>
+          <div class="form-group" style="margin-bottom: 8px;">
+            <label class="form-label" for="inputMetaKeywords">Từ khóa (cách nhau bằng dấu phẩy):</label>
+            <input type="text" id="inputMetaKeywords" class="form-input" placeholder="Ví dụ: báo cáo, Q3, tài chính" maxlength="300">
+          </div>
+          <div class="form-group" style="margin-bottom: 8px;">
+            <label class="form-label" for="inputMetaCreator">Ứng dụng tạo (Creator):</label>
+            <input type="text" id="inputMetaCreator" class="form-input" placeholder="Ví dụ: PDF Craft" maxlength="200">
+          </div>
+          <div class="dialog-actions">
+            <button class="btn btn-tool" id="btnCancelMetaModal">Hủy</button>
+            <button class="btn btn-primary" id="btnSaveMeta">Lưu metadata</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="utils.js?v=2.4" defer></script>
+  <script src="app.js?v=2.4" defer></script>
+</body>
+</html>

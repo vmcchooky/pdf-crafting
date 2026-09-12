@@ -1,0 +1,9 @@
+{
+  "include": [
+    "benchmark.py",
+    "python"
+  ],
+  "extraPaths": [
+    "python"
+  ]
+}

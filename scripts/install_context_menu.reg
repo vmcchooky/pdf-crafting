@@ -1,0 +1,19 @@
+Windows Registry Editor Version 5.00
+
+; ========================================================================
+; Đăng ký "Open with PDF Craft" vào Menu chuột phải tệp .pdf trong Windows
+; ========================================================================
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.pdf\shell\PDFCraft]
+@="Open with PDF Craft"
+"Icon"="\"D:\\Manus\\pdf-crafting\\PDFCraft.exe\",0"
+
+[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.pdf\shell\PDFCraft\command]
+@="\"D:\\Manus\\pdf-crafting\\PDFCraft.exe\" \"%1\""
+
+[HKEY_CURRENT_USER\Software\Classes\.pdf\shell\PDFCraft]
+@="Open with PDF Craft"
+"Icon"="\"D:\\Manus\\pdf-crafting\\PDFCraft.exe\",0"
+
+[HKEY_CURRENT_USER\Software\Classes\.pdf\shell\PDFCraft\command]
+@="\"D:\\Manus\\pdf-crafting\\PDFCraft.exe\" \"%1\""

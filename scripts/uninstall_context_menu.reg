@@ -1,0 +1,9 @@
+Windows Registry Editor Version 5.00
+
+; ========================================================================
+; Gỡ bỏ "Open with PDF Craft" khỏi Menu chuột phải Windows
+; ========================================================================
+
+[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.pdf\shell\PDFCraft]
+
+[-HKEY_CURRENT_USER\Software\Classes\.pdf\shell\PDFCraft]

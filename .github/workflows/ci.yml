@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pypdf pytest ruff mypy pyright
+      - run: python -m ruff check python/
+      - run: python -m ruff format --check python/
+      - run: python -m mypy python/pdfcraft/
+      - run: python -m pyright
+      - run: python -m pytest python/tests -q
+
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - working-directory: go
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./...
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          node --check web/app.js
+          node --check web/utils.js
+          node --test web/tests/utils.test.js
+      - working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          npx playwright test
