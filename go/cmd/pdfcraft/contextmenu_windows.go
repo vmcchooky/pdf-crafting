@@ -80,15 +80,19 @@ func installContextMenu() error {
 		for _, v := range verbs {
 			vKey := key + `\` + v.name
 			// 1. Tên hiển thị trong menu chuột phải
+			// #nosec G204 -- binary cố định "reg", tham số dựng từ hằng nội bộ + label tĩnh
 			_ = exec.Command("reg", "add", vKey, "/ve", "/t", "REG_SZ", "/d", v.label, "/f").Run()
 			// 2. Biểu tượng ứng dụng PDF Craft
+			// #nosec G204 -- binary cố định "reg", exePath là đường dẫn của chính ứng dụng đang chạy
 			_ = exec.Command("reg", "add", vKey, "/v", "Icon", "/t", "REG_SZ", "/d", fmt.Sprintf(`"%s",0`, exePath), "/f").Run()
 			// 3. Gộp nhiều file trong 1 tiến trình duy nhất (thay vì mở N cửa sổ)
 			if v.multiSelect {
+				// #nosec G204 -- binary cố định "reg", toàn bộ tham số là hằng tĩnh
 				_ = exec.Command("reg", "add", vKey, "/v", "MultiSelectModel", "/t", "REG_SZ", "/d", "Player", "/f").Run()
 			}
 			// 4. Lệnh thực thi khi nhấp chuột
 			cmdKey := vKey + `\command`
+			// #nosec G204 -- binary cố định "reg", command ghi vào registry chính là exe của app
 			_ = exec.Command("reg", "add", cmdKey, "/ve", "/t", "REG_SZ", "/d", fmt.Sprintf(v.args, exePath), "/f").Run()
 		}
 	}
@@ -98,6 +102,7 @@ func installContextMenu() error {
 // uninstallContextMenu gỡ bỏ sạch sẽ các khóa menu chuột phải
 func uninstallContextMenu() error {
 	for _, key := range contextMenuVerbKeys() {
+		// #nosec G204 -- binary cố định "reg", key dựng từ hằng nội bộ, không chứa input người dùng
 		_ = exec.Command("reg", "delete", key, "/f").Run()
 	}
 	return nil

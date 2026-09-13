@@ -91,6 +91,7 @@ func isPdfOrExistingFile(path string) bool {
 	if strings.HasSuffix(strings.ToLower(path), ".pdf") {
 		return true
 	}
+	// #nosec G703 -- CLI cục bộ: path do chính người dùng nhập, không phải dữ liệu từ mạng
 	fi, err := os.Stat(path)
 	return err == nil && !fi.IsDir()
 }
@@ -828,6 +829,7 @@ func runCompressContext(args []string) {
 }
 
 func fileSizeOf(path string) int64 {
+	// #nosec G703 -- CLI cục bộ: path là file input/output do người dùng chỉ định
 	fi, err := os.Stat(path)
 	if err != nil {
 		return 0

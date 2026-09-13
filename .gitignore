@@ -18,3 +18,7 @@ web/blob-report/
 bench_work/
 scratch/
 scratch_edge/
+
+# Go release artifact (phát hành qua GitHub Releases, không commit)
+PDFCraft.exe
+pdfcraft.exe

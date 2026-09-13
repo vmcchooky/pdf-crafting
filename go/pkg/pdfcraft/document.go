@@ -586,6 +586,7 @@ func GetInfoWithPassword(pdfPath, password string) (*DocInfo, error) {
 		return nil, fmt.Errorf("không thể truy cập tệp PDF: %w", err)
 	}
 
+	// #nosec G304 -- mở đúng file người dùng yêu cầu, đây là chức năng cốt lõi của công cụ xử lý PDF cục bộ
 	f, err := os.Open(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("không thể mở tệp PDF: %w", err)

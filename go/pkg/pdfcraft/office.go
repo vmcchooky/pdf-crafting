@@ -157,6 +157,7 @@ func ConvertOfficeToPdf(inputPaths []string, outDir, enginePath string, timeoutS
 
 				args := []string{"--headless", "--convert-to", "pdf", "--outdir", tmpDir}
 				args = append(args, batch...)
+				// #nosec G204 -- engine là LibreOffice/MS Word đã kiểm chứng tồn tại, batch là file do người dùng chỉ định cho CLI cục bộ
 				cmd := exec.CommandContext(ctx, engine, args...)
 				out, err := cmd.CombinedOutput()
 				if ctx.Err() == context.DeadlineExceeded {

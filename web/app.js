@@ -724,6 +724,7 @@ const btnSearchNext = document.getElementById('btnSearchNext');
 const btnSearchClear = document.getElementById('btnSearchClear');
 
 const pageTextCache = new Map(); // pageId -> trích xuất text (cache suốt phiên)
+const pageNormCache = new Map(); // pageId -> text đã chuẩn hóa không dấu (tính 1 lần, tìm kiếm dùng lại)
 const searchState = { query: '', hits: [], total: 0, cursor: -1 };
 let searchDebounce = null;
 let searchRunToken = 0;
@@ -738,6 +739,7 @@ async function getPageText(pageItem) {
     const tc = await page.getTextContent();
     const text = ((tc && tc.items) || []).map(it => (it && it.str) || '').join(' ');
     pageTextCache.set(pageItem.id, text);
+    pageNormCache.set(pageItem.id, normalizeText(text));
     return text;
   } catch (e) {
     return '';
@@ -814,11 +816,15 @@ async function runSearch() {
   const pages = [];
   for (const p of state.pages) {
     if (token !== searchRunToken) return; // truy vấn mới hơn đã tới, bỏ lượt này
-    pages.push({ id: p.id, text: await getPageText(p) });
+    // Dùng bản chuẩn hóa đã cache (tính 1 lần khi trích xuất) thay vì normalize lại mỗi lần gõ
+    let norm = pageNormCache.get(p.id);
+    if (norm === undefined) norm = normalizeText(await getPageText(p));
+    pages.push({ id: p.id, text: norm });
   }
   if (token !== searchRunToken) return;
 
-  const hits = findTextMatches(pages, q);
+  // Query chuẩn hóa trước (1 lần), trang đã chuẩn hóa sẵn -> so khớp thuần túy, kết quả đồng nhất với trước đây
+  const hits = findTextMatches(pages, normalizeText(q), { accentInsensitive: false });
   searchState.hits = hits;
   searchState.total = hits.reduce((a, h) => a + h.matches, 0);
   const hitIds = new Set(hits.map(h => h.id));
@@ -1011,6 +1017,7 @@ async function loadProjectFile(file) {
   thumbnailCache.clear();
   previewCache.clear();
   pageTextCache.clear();
+  pageNormCache.clear();
   if (searchInput) {
     searchInput.value = '';
     clearSearch();
@@ -1265,7 +1272,7 @@ function setupToolbarEvents() {
 
     if (confirm(`Bạn có chắc chắn muốn xóa ${selectedCount} trang đã chọn?`)) {
       saveHistoryState();
-      state.pages.filter(p => p.isSelected).forEach(p => pageTextCache.delete(p.id));
+      state.pages.filter(p => p.isSelected).forEach(p => { pageTextCache.delete(p.id); pageNormCache.delete(p.id); });
       state.pages = state.pages.filter(p => !p.isSelected);
       updateSelectionUI();
       renderGrid();
@@ -1824,6 +1831,12 @@ async function loadPdfFiles(files, isAppend = false) {
   showToast(`Đang chuẩn bị xử lý ${validFiles.length} tệp PDF...`, 'success');
 
   if (!isAppend) {
+    // Giải phóng worker + bộ nhớ pdf.js của phiên cũ trước khi nạp mới (tránh leak RAM khi mở file khác)
+    for (const src of state.sources.values()) {
+      try {
+        if (src.pdfJsDoc && typeof src.pdfJsDoc.destroy === 'function') await src.pdfJsDoc.destroy();
+      } catch (e) { /* bỏ qua: doc có thể đã được destroy */ }
+    }
     state.sources.clear();
     state.pages = [];
     state.groups = [];
@@ -1833,6 +1846,7 @@ async function loadPdfFiles(files, isAppend = false) {
     updateUndoButtonUI();
     updateRedoButtonUI();
     pageTextCache.clear();
+    pageNormCache.clear();
     if (typeof clearSearch === 'function' && searchInput) {
       searchInput.value = '';
       clearSearch();
@@ -2124,6 +2138,7 @@ function deleteSinglePage(card, curIdx) {
     thumbnailCache.delete(`${removedItem.id}_${removedItem.rotation}`);
     previewCache.delete(`${removedItem.id}_${removedItem.rotation}_hd`);
     pageTextCache.delete(removedItem.id);
+    pageNormCache.delete(removedItem.id);
   }
   updateSelectionUI();
   renderGrid();
@@ -2470,10 +2485,27 @@ async function renderThumbnailAsync(pageItem, canvas, card) {
   offscreen.height = Math.max(1, Math.floor(viewport.height));
   const offCtx = offscreen.getContext('2d');
 
-  await page.render({
+  // Hủy render cũ còn dở trên cùng canvas (cuộn nhanh) để GPU không decode frame sẽ bị vứt đi
+  try {
+    if (canvas._pdfRenderTask && typeof canvas._pdfRenderTask.cancel === 'function') canvas._pdfRenderTask.cancel();
+  } catch (e) { /* bỏ qua */ }
+
+  const renderTask = page.render({
     canvasContext: offCtx,
     viewport: viewport,
-  }).promise;
+  });
+  canvas._pdfRenderTask = renderTask;
+  try {
+    await renderTask.promise;
+  } catch (e) {
+    if (e && e.name === 'RenderingCancelledException') return;
+    throw e;
+  } finally {
+    if (typeof page.cleanup === 'function') { try { page.cleanup(); } catch (_) {} }
+    if (canvas._pdfRenderTask === renderTask) canvas._pdfRenderTask = null;
+  }
+  // Tác vụ mới hơn đã chiếm canvas trong lúc chờ -> bỏ kết quả cũ, tránh vẽ đè frame mới
+  if (canvas._pdfRenderTask) return;
 
   let bitmap = null;
   if (window.createImageBitmap) {
@@ -2766,12 +2798,17 @@ async function renderPageToCache(pageIndex) {
       }
     }
 
+    // Chỉ giữ 1 bản: bitmap (GPU) hoặc canvas (fallback) — không giữ cả hai để giảm ~50% RAM preview HD
     const entry = {
-      canvas: offscreen,
+      canvas: bitmap ? null : offscreen,
       bitmap: bitmap,
       width: viewport.width,
       height: viewport.height,
     };
+    if (bitmap) {
+      offscreen.width = 0;
+      offscreen.height = 0;
+    }
     previewCache.set(cacheKey, entry);
     return entry;
   } catch (err) {
@@ -2837,6 +2874,8 @@ async function openPageInNewTab(pageItem, pageNum) {
     const blob = new Blob([pdfBytes], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
+    // Tab mới cần thời gian tải blob -> thu hồi muộn (60s) để không leak URL/blob mỗi lần mở
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (err) {
     console.error('Lỗi khi mở trang trong tab mới:', err);
     showToast('Lỗi khi mở trang: ' + err.message, 'danger');

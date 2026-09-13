@@ -5,6 +5,15 @@ on:
   pull_request:
 
 jobs:
+  web-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/sync_web.py --check
+
   python:
     runs-on: ubuntu-latest
     steps:
@@ -12,7 +21,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pypdf pytest ruff mypy pyright
+      - run: pip install pypdf pillow pytest ruff mypy pyright
       - run: python -m ruff check python/
       - run: python -m ruff format --check python/
       - run: python -m mypy python/pdfcraft/
@@ -25,12 +34,28 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version-file: go/go.mod
       - working-directory: go
         run: |
+          test -z "$(gofmt -l .)"
           go build ./...
           go vet ./...
           go test ./...
+
+  go-sec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+      - run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+      - working-directory: go
+        run: |
+          "$(go env GOPATH)/bin/gosec" -fmt text ./...
+          "$(go env GOPATH)/bin/govulncheck" ./...
 
   web:
     runs-on: ubuntu-latest
