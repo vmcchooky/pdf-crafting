@@ -410,7 +410,7 @@ class PdfDocument:
         }
         for key, value in updates.items():
             if value is not None:
-                self._metadata[key] = str(value)
+                self._metadata[key] = value
         return self
 
     def add_text_watermark(
