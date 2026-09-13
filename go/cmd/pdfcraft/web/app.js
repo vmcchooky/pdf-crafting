@@ -105,8 +105,9 @@ const thumbnailObserver = new IntersectionObserver((entries) => {
 
     if (entry.isIntersecting) {
       // 1. Thẻ tiến vào khung nhìn (hoặc vùng đệm 500px):
+      const isActuallyVisible = entry.intersectionRatio > 0;
       if (!card.dataset.thumbRendered) {
-        enqueueThumbnailRender(pageItem, canvas, card);
+        enqueueThumbnailRender(pageItem, canvas, card, isActuallyVisible);
       } else if (canvas.width === 0) {
         // Đã từng render nhưng vừa được thu hồi bộ nhớ khi ở xa -> vẽ lại siêu tốc (<0.5ms) từ LRU Cache
         const cacheKey = `${pageItem.id}_${pageItem.rotation}`;
@@ -129,7 +130,7 @@ const thumbnailObserver = new IntersectionObserver((entries) => {
         } else {
           // Bị giải phóng khỏi LRU Cache -> nạp lại bình thường
           delete card.dataset.thumbRendered;
-          enqueueThumbnailRender(pageItem, canvas, card);
+          enqueueThumbnailRender(pageItem, canvas, card, isActuallyVisible);
         }
       }
     } else {
@@ -141,6 +142,12 @@ const thumbnailObserver = new IntersectionObserver((entries) => {
         canvas.style.opacity = '0';
         const skel = card.querySelector('.card-thumbnail-skeleton');
         if (skel) skel.style.display = 'flex';
+      }
+      // HỦY TÁC VỤ ĐANG XẾP HÀNG CHỜ RENDER NẾU ĐÃ CUỘN RA XA:
+      // Không tốn CPU/GPU decode các trang người dùng đã cuộn qua!
+      const qIdx = thumbnailRenderQueue.findIndex(t => t.card === card);
+      if (qIdx !== -1) {
+        thumbnailRenderQueue.splice(qIdx, 1);
       }
     }
   });
@@ -798,6 +805,30 @@ function stepSearch(dir) {
   focusSearchHit();
 }
 
+let backgroundIndexingToken = 0;
+function startBackgroundTextIndexing() {
+  const currentToken = ++backgroundIndexingToken;
+  if (!('requestIdleCallback' in window)) return;
+
+  let pageIndex = 0;
+  function scheduleNext() {
+    window.requestIdleCallback((deadline) => {
+      if (currentToken !== backgroundIndexingToken) return;
+      while (pageIndex < state.pages.length && deadline.timeRemaining() > 5) {
+        const pageItem = state.pages[pageIndex++];
+        if (pageItem && !pageNormCache.has(pageItem.id)) {
+          getPageText(pageItem).catch(() => {});
+        }
+      }
+      if (pageIndex < state.pages.length && currentToken === backgroundIndexingToken) {
+        scheduleNext();
+      }
+    }, { timeout: 3000 });
+  }
+
+  scheduleNext();
+}
+
 async function runSearch() {
   if (!searchInput) return;
   const token = ++searchRunToken;
@@ -812,6 +843,18 @@ async function runSearch() {
     return;
   }
   if (searchCount) searchCount.textContent = 'Đang tìm…';
+
+  // Gom các trang chưa trích xuất văn bản để nạp song song bằng Concurrency Pool (4 trang/đợt)
+  const uncached = state.pages.filter(p => !pageNormCache.has(p.id));
+  if (uncached.length > 0) {
+    const CONCURRENCY = 4;
+    for (let i = 0; i < uncached.length; i += CONCURRENCY) {
+      if (token !== searchRunToken) return;
+      const batch = uncached.slice(i, i + CONCURRENCY);
+      await Promise.all(batch.map(p => getPageText(p)));
+    }
+  }
+  if (token !== searchRunToken) return;
 
   const pages = [];
   for (const p of state.pages) {
@@ -1086,6 +1129,7 @@ async function loadProjectFile(file) {
     updateSelectionUI();
     renderGrid();
     renderGroupBar();
+    startBackgroundTextIndexing();
     showToast(`Đã khôi phục project: ${state.pages.length} trang từ ${newSourceIds.length} file!`, 'success');
   } catch (err) {
     console.error('Lỗi khi mở project:', err);
@@ -1871,7 +1915,7 @@ async function loadPdfFiles(files, isAppend = false) {
       const arrayBuffer = await file.arrayBuffer();
       const sourceId = 'src_' + (nextId++);
 
-      // Chỉ nạp qua pdfjsLib (chạy trong Web Worker riêng), KHÔNG nạp đồng bộ PDFLib để tránh đóng băng giao diện
+      // Truyền bản sao slice(0) cho Worker của pdf.js để tránh Worker chiếm và detach master buffer
       const pdfJsDoc = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
 
       const srcObj = {
@@ -1944,6 +1988,7 @@ async function loadPdfFiles(files, isAppend = false) {
   updateSelectionUI();
   renderGrid();
   renderGroupBar();
+  startBackgroundTextIndexing();
 
   if (isAppend) {
     showToast(`Đã thêm ${totalNewPages} trang từ ${loadedCount} tệp PDF vào tài liệu!`, 'success');
@@ -2467,160 +2512,62 @@ function setupPagesGridDelegation() {
 }
 
 function createCardElement(pageItem, index) {
-  const card = document.createElement('div');
-  card.className = 'page-card' + (pageItem.isSelected ? ' selected' : '');
-  card.draggable = true;
+  const cardTemplate = document.getElementById('cardTemplate');
+  let card;
+  if (cardTemplate && cardTemplate.content && cardTemplate.content.firstElementChild) {
+    card = cardTemplate.content.firstElementChild.cloneNode(true);
+  } else {
+    card = document.createElement('div');
+    card.className = 'page-card';
+    card.draggable = true;
+  }
+  if (pageItem.isSelected) card.classList.add('selected');
   card.dataset.index = index;
   card.dataset.pageId = pageItem.id;
 
-  // Header
-  const cardHeader = document.createElement('div');
-  cardHeader.className = 'card-header';
+  const checkbox = card.querySelector('.custom-checkbox');
+  if (checkbox) checkbox.checked = pageItem.isSelected;
 
-  const leftHeader = document.createElement('div');
-  leftHeader.className = 'card-header-left';
-  leftHeader.dataset.action = 'select-card';
-  leftHeader.style.display = 'flex';
-  leftHeader.style.alignItems = 'center';
-  leftHeader.style.gap = '8px';
-  leftHeader.style.cursor = 'pointer';
-
-  const checkbox = document.createElement('input');
-  checkbox.type = 'checkbox';
-  checkbox.className = 'custom-checkbox';
-  checkbox.checked = pageItem.isSelected;
-  checkbox.dataset.action = 'select-card';
-
-  const badge = document.createElement('span');
-  badge.className = 'card-num-badge';
-  badge.textContent = `#${index + 1}`;
-
-  leftHeader.appendChild(checkbox);
-  leftHeader.appendChild(badge);
+  const badge = card.querySelector('.card-num-badge');
+  if (badge) badge.textContent = `#${index + 1}`;
 
   if (pageItem.stamps && pageItem.stamps.length > 0) {
-    const signedBadge = document.createElement('span');
-    signedBadge.className = 'card-signed-badge';
-    signedBadge.title = `Trang này có ${pageItem.stamps.length} chữ ký / con dấu`;
-    signedBadge.innerHTML = `🖋️ ${pageItem.stamps.length}`;
-    leftHeader.appendChild(signedBadge);
+    const leftHeader = card.querySelector('.card-header-left');
+    if (leftHeader) {
+      const signedBadge = document.createElement('span');
+      signedBadge.className = 'card-signed-badge';
+      signedBadge.title = `Trang này có ${pageItem.stamps.length} chữ ký / con dấu`;
+      signedBadge.innerHTML = `🖋️ ${pageItem.stamps.length}`;
+      leftHeader.appendChild(signedBadge);
+    }
   }
 
-  // Header Action buttons (Event Delegation - Không cấp phát closure trong mỗi thẻ)
-  const actionsWrapper = document.createElement('div');
-  actionsWrapper.className = 'card-header-actions';
-  actionsWrapper.innerHTML = `
-    <button type="button" class="card-action-btn" data-action="open-tab" title="Mở trang này trong tab mới">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-        <polyline points="15 3 21 3 21 9"></polyline>
-        <line x1="10" y1="14" x2="21" y2="3"></line>
-      </svg>
-    </button>
-    <button type="button" class="card-action-btn" data-action="rotate" title="Xoay trang 90°">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
-      </svg>
-    </button>
-    <button type="button" class="card-action-btn" data-action="sign" title="Ký điện tử & đóng dấu trang này">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
-        <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
-        <path d="M2 2l7.586 7.586"></path>
-      </svg>
-    </button>
-    <button type="button" class="card-action-btn" data-action="zoom" title="Xem chi tiết phóng to">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="11" cy="11" r="8"></circle>
-        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        <line x1="11" y1="8" x2="11" y2="14"></line>
-        <line x1="8" y1="11" x2="14" y2="11"></line>
-      </svg>
-    </button>
-    <button type="button" class="card-action-btn btn-delete" data-action="delete" title="Xóa trang này">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <polyline points="3 6 5 6 21 6"></polyline>
-        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-      </svg>
-    </button>
-  `;
+  const titleInput = card.querySelector('.card-title-input');
+  if (titleInput) titleInput.value = pageItem.title || `#${index + 1}`;
 
-  cardHeader.appendChild(leftHeader);
-  cardHeader.appendChild(actionsWrapper);
+  const skelSpan = card.querySelector('.card-thumbnail-skeleton span');
+  if (skelSpan) skelSpan.textContent = `#${index + 1}`;
 
-  // Editable Page Title Input
-  const titleInput = document.createElement('input');
-  titleInput.type = 'text';
-  titleInput.className = 'card-title-input';
-  titleInput.value = pageItem.title || `#${index + 1}`;
-  titleInput.placeholder = 'Đặt tên trang...';
-  titleInput.title = 'Nhấp để đổi tên trang';
+  const thumbWrapper = card.querySelector('.card-thumbnail-wrapper');
+  if (thumbWrapper) thumbnailObserver.observe(thumbWrapper);
 
-  // Thumbnail Container with Skeleton Loader
-  const thumbWrapper = document.createElement('div');
-  thumbWrapper.className = 'card-thumbnail-wrapper';
-  thumbWrapper.dataset.action = 'zoom';
-  thumbWrapper.title = 'Nhấn để xem chi tiết trang';
-
-  const skeleton = document.createElement('div');
-  skeleton.className = 'card-thumbnail-skeleton';
-  skeleton.innerHTML = `<span>#${index + 1}</span>`;
-  thumbWrapper.appendChild(skeleton);
-
-  const canvas = document.createElement('canvas');
-  canvas.style.opacity = '0';
-  thumbWrapper.appendChild(canvas);
-
-  // Hover overlay with zoom badge
-  const hoverOverlay = document.createElement('div');
-  hoverOverlay.className = 'thumb-hover-overlay';
-  hoverOverlay.innerHTML = `
-    <div class="thumb-zoom-badge">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="11" cy="11" r="8"></circle>
-        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        <line x1="11" y1="8" x2="11" y2="14"></line>
-        <line x1="8" y1="11" x2="14" y2="11"></line>
-      </svg>
-      Xem chi tiết
-    </div>
-  `;
-  thumbWrapper.appendChild(hoverOverlay);
-
-  // Gắn Observer để tải thumbnail lười (lazy load) và thu hồi VRAM khi ở xa
-  thumbnailObserver.observe(thumbWrapper);
-
-  // Group tags container
-  const groupWrapper = document.createElement('div');
-  groupWrapper.className = 'card-groups-wrapper';
-  renderCardGroupPills(pageItem, groupWrapper);
-
-  // Footer
-  const cardFooter = document.createElement('div');
-  cardFooter.className = 'card-footer';
+  const groupWrapper = card.querySelector('.card-groups-wrapper');
+  if (groupWrapper) renderCardGroupPills(pageItem, groupWrapper);
 
   const srcObj = state.sources.get(pageItem.sourceId);
-  const sourceTag = document.createElement('span');
-  sourceTag.className = 'card-source-tag';
-  sourceTag.title = srcObj ? srcObj.name : '';
-  sourceTag.textContent = srcObj ? srcObj.name : '';
+  const sourceTag = card.querySelector('.card-source-tag');
+  if (sourceTag && srcObj) {
+    sourceTag.textContent = srcObj.name;
+    sourceTag.title = srcObj.name;
+  }
 
-  const dimTag = document.createElement('span');
-  dimTag.className = 'card-dim-tag';
-  const isSwapped = (pageItem.rotation / 90) % 2 !== 0;
-  const currentW = isSwapped ? pageItem.height : pageItem.width;
-  const currentH = isSwapped ? pageItem.width : pageItem.height;
-  dimTag.textContent = `${currentW} × ${currentH} pt`;
-
-  cardFooter.appendChild(sourceTag);
-  cardFooter.appendChild(dimTag);
-
-  // Assemble Card
-  card.appendChild(cardHeader);
-  card.appendChild(titleInput);
-  card.appendChild(thumbWrapper);
-  card.appendChild(groupWrapper);
-  card.appendChild(cardFooter);
+  const dimTag = card.querySelector('.card-dim-tag');
+  if (dimTag) {
+    const isSwapped = (pageItem.rotation / 90) % 2 !== 0;
+    const currentW = isSwapped ? pageItem.height : pageItem.width;
+    const currentH = isSwapped ? pageItem.width : pageItem.height;
+    dimTag.textContent = `${currentW} × ${currentH} pt`;
+  }
 
   return card;
 }
@@ -2629,13 +2576,14 @@ function createCardElement(pageItem, index) {
 // Concurrency-Limited Background Thumbnail Rendering with ImageBitmap
 // ==========================================================================
 
-function enqueueThumbnailRender(pageItem, canvas, card) {
+function enqueueThumbnailRender(pageItem, canvas, card, highPriority = false) {
   if (!pageItem || !canvas || !card) return;
   const cacheKey = `${pageItem.id}_${pageItem.rotation}`;
 
   if (thumbnailCache.has(cacheKey)) {
     const cached = thumbnailCache.get(cacheKey);
     requestAnimationFrame(() => {
+      if (!document.body.contains(canvas)) return;
       canvas.width = cached.width;
       canvas.height = cached.height;
       const ctx = canvas.getContext('2d');
@@ -2655,12 +2603,22 @@ function enqueueThumbnailRender(pageItem, canvas, card) {
     return;
   }
 
-  // Tránh lặp tác vụ trong hàng đợi
-  const alreadyInQueue = thumbnailRenderQueue.some(t => t.pageItem.id === pageItem.id && t.pageItem.rotation === pageItem.rotation);
-  if (!alreadyInQueue) {
-    thumbnailRenderQueue.push({ pageItem, canvas, card });
-    processThumbnailQueue();
+  // Tránh lặp tác vụ trong hàng đợi, ưu tiên đưa lên đầu nếu thẻ nhìn thấy thực tế
+  const existingIdx = thumbnailRenderQueue.findIndex(t => t.pageItem.id === pageItem.id && t.pageItem.rotation === pageItem.rotation);
+  if (existingIdx !== -1) {
+    if (highPriority && existingIdx > 0) {
+      const [t] = thumbnailRenderQueue.splice(existingIdx, 1);
+      thumbnailRenderQueue.unshift(t);
+    }
+    return;
   }
+
+  if (highPriority) {
+    thumbnailRenderQueue.unshift({ pageItem, canvas, card });
+  } else {
+    thumbnailRenderQueue.push({ pageItem, canvas, card });
+  }
+  processThumbnailQueue();
 }
 
 async function processThumbnailQueue() {
@@ -2711,9 +2669,14 @@ async function renderThumbnailAsync(pageItem, canvas, card) {
   // Giảm scale từ 0.45 xuống 0.32 giúp tiết kiệm ~50% VRAM/RAM và tăng tốc render PDF.js ~40%
   const viewport = page.getViewport({ scale: 0.32, rotation });
 
-  const offscreen = document.createElement('canvas');
-  offscreen.width = Math.max(1, Math.floor(viewport.width));
-  offscreen.height = Math.max(1, Math.floor(viewport.height));
+  const useOffscreen = typeof OffscreenCanvas !== 'undefined';
+  const offW = Math.max(1, Math.floor(viewport.width));
+  const offH = Math.max(1, Math.floor(viewport.height));
+  const offscreen = useOffscreen ? new OffscreenCanvas(offW, offH) : document.createElement('canvas');
+  if (!useOffscreen) {
+    offscreen.width = offW;
+    offscreen.height = offH;
+  }
   const offCtx = offscreen.getContext('2d');
 
   // Hủy render cũ còn dở trên cùng canvas (cuộn nhanh) để GPU không decode frame sẽ bị vứt đi
@@ -2804,8 +2767,9 @@ async function renderPageToCache(pageIndex) {
     return previewCache.get(cacheKey);
   }
 
+  let page = null;
   try {
-    const page = await srcObj.pdfJsDoc.getPage(pageItem.pageIndex + 1);
+    page = await srcObj.pdfJsDoc.getPage(pageItem.pageIndex + 1);
     const rotation = (page.rotate + pageItem.rotation) % 360;
 
     // Giới hạn scale thông minh: Tối đa 1920px để tránh ngốn bộ nhớ GPU/RAM trong Chrome
@@ -2814,9 +2778,14 @@ async function renderPageToCache(pageIndex) {
     const targetScale = Math.min(2.0, Math.max(1.2, 1920 / maxDim));
     const viewport = page.getViewport({ scale: targetScale, rotation });
 
-    const offscreen = document.createElement('canvas');
-    offscreen.width = Math.max(1, Math.floor(viewport.width));
-    offscreen.height = Math.max(1, Math.floor(viewport.height));
+    const useOffscreen = typeof OffscreenCanvas !== 'undefined';
+    const offW = Math.max(1, Math.floor(viewport.width));
+    const offH = Math.max(1, Math.floor(viewport.height));
+    const offscreen = useOffscreen ? new OffscreenCanvas(offW, offH) : document.createElement('canvas');
+    if (!useOffscreen) {
+      offscreen.width = offW;
+      offscreen.height = offH;
+    }
     const offCtx = offscreen.getContext('2d');
 
     await page.render({
@@ -2852,6 +2821,10 @@ async function renderPageToCache(pageIndex) {
     }
     console.error('Error rendering page to cache:', err);
     return null;
+  } finally {
+    if (page && typeof page.cleanup === 'function') {
+      try { page.cleanup(); } catch (_) {}
+    }
   }
 }
 
@@ -3300,61 +3273,66 @@ async function executeCompressAndExport(pagesToExport, outputFileName, options) 
         if (options.rasterizeHeavy) {
           const pdfJsDoc = srcObj.pdfJsDoc;
           const page = await pdfJsDoc.getPage(item.pageIndex + 1);
+          try {
+            const dpi = options.dpi || 150;
+            const scale = dpi / 72.0;
+            const totalRotation = ((item.rotation || 0) % 360 + 360) % 360;
 
-          const dpi = options.dpi || 150;
-          const scale = dpi / 72.0;
-          const totalRotation = ((item.rotation || 0) % 360 + 360) % 360;
+            const viewport = page.getViewport({ scale: scale, rotation: totalRotation });
 
-          const viewport = page.getViewport({ scale: scale, rotation: totalRotation });
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.floor(viewport.width));
+            canvas.height = Math.max(1, Math.floor(viewport.height));
+            const ctx = canvas.getContext('2d', { alpha: false });
 
-          const canvas = document.createElement('canvas');
-          canvas.width = Math.max(1, Math.floor(viewport.width));
-          canvas.height = Math.max(1, Math.floor(viewport.height));
-          const ctx = canvas.getContext('2d', { alpha: false });
+            // Nền trắng tinh khôi chuẩn nén JPEG
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-          // Nền trắng tinh khôi chuẩn nén JPEG
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
+            await page.render({
+              canvasContext: ctx,
+              viewport: viewport
+            }).promise;
 
-          await page.render({
-            canvasContext: ctx,
-            viewport: viewport
-          }).promise;
+            if (item.stamps && item.stamps.length > 0) {
+              await drawStampsOnCanvasAsync(ctx, item.stamps, canvas.width, canvas.height);
+            }
 
-          if (item.stamps && item.stamps.length > 0) {
-            await drawStampsOnCanvasAsync(ctx, item.stamps, canvas.width, canvas.height);
+            // Chuyển sang thang xám bằng GPU shader native filter (tối ưu hóa 100% phần cứng, không dùng CPU loop)
+            if (options.grayscale) {
+              const grayCanvas = document.createElement('canvas');
+              grayCanvas.width = canvas.width;
+              grayCanvas.height = canvas.height;
+              const grayCtx = grayCanvas.getContext('2d');
+              grayCtx.filter = 'grayscale(100%)';
+              grayCtx.drawImage(canvas, 0, 0);
+              ctx.drawImage(grayCanvas, 0, 0);
+              grayCanvas.width = 0;
+              grayCanvas.height = 0;
+            }
+
+            // Nén ảnh JPEG ở mức chất lượng yêu cầu bằng native toBlob (tối ưu hóa luồng bộ nhớ, không tạo chuỗi Base64)
+            const quality = Math.max(0.1, Math.min(1.0, options.quality || 0.75));
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+            const arrayBuffer = await blob.arrayBuffer();
+            const bytes = new Uint8Array(arrayBuffer);
+
+            const unscaledViewport = page.getViewport({ scale: 1.0, rotation: totalRotation });
+            renderedPages[taskIndex] = {
+              type: 'raster',
+              bytes: bytes,
+              width: unscaledViewport.width,
+              height: unscaledViewport.height
+            };
+
+            // Giải phóng canvas ngay lập tức để tiết kiệm bộ nhớ RAM
+            canvas.width = 0;
+            canvas.height = 0;
+          } finally {
+            if (page && typeof page.cleanup === 'function') {
+              try { page.cleanup(); } catch (_) {}
+            }
           }
-
-          // Chuyển sang thang xám bằng GPU shader native filter (tối ưu hóa 100% phần cứng, không dùng CPU loop)
-          if (options.grayscale) {
-            const grayCanvas = document.createElement('canvas');
-            grayCanvas.width = canvas.width;
-            grayCanvas.height = canvas.height;
-            const grayCtx = grayCanvas.getContext('2d');
-            grayCtx.filter = 'grayscale(100%)';
-            grayCtx.drawImage(canvas, 0, 0);
-            ctx.drawImage(grayCanvas, 0, 0);
-            grayCanvas.width = 0;
-            grayCanvas.height = 0;
-          }
-
-          // Nén ảnh JPEG ở mức chất lượng yêu cầu bằng native toBlob (tối ưu hóa luồng bộ nhớ, không tạo chuỗi Base64)
-          const quality = Math.max(0.1, Math.min(1.0, options.quality || 0.75));
-          const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
-          const arrayBuffer = await blob.arrayBuffer();
-          const bytes = new Uint8Array(arrayBuffer);
-
-          const unscaledViewport = page.getViewport({ scale: 1.0, rotation: totalRotation });
-          renderedPages[taskIndex] = {
-            type: 'raster',
-            bytes: bytes,
-            width: unscaledViewport.width,
-            height: unscaledViewport.height
-          };
-
-          // Giải phóng canvas ngay lập tức để tiết kiệm bộ nhớ RAM
-          canvas.width = 0;
-          canvas.height = 0;
         } else {
           renderedPages[taskIndex] = {
             type: 'vector',
