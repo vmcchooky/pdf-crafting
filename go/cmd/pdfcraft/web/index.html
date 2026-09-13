@@ -962,20 +962,20 @@
 
             <!-- Tab 3: Tạo con dấu tên / chức danh / nghiệp vụ chuẩn Việt Nam -->
             <div class="sign-tab-content" id="paneOfficial" style="display: none;">
-              <!-- Quick Presets Categorized Chips -->
+              <!-- Quick Presets Categorized Chips (collapsible groups) -->
               <div class="official-presets-bar">
-                <span style="font-size: 0.78rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 2px;">Mẫu dấu nghiệp vụ nhanh:</span>
-                <div class="official-presets-group">
-                  <span class="official-group-tag">Cá nhân & Đơn vị:</span>
+                <span class="official-presets-title">Mẫu dấu nghiệp vụ nhanh:</span>
+                <details class="official-presets-group" open>
+                  <summary class="official-group-tag">Cá nhân &amp; Đơn vị</summary>
                   <div class="official-presets-list">
                     <button type="button" class="btn-preset-chip active" data-preset="title_name">Chức danh + Tên</button>
                     <button type="button" class="btn-preset-chip" data-preset="name_only">Dấu tên 1 dòng</button>
                     <button type="button" class="btn-preset-chip" data-preset="business_tax">Dấu vuông MST (3 dòng)</button>
                     <button type="button" class="btn-preset-chip" data-preset="round_stamp">Dấu tròn nội bộ</button>
                   </div>
-                </div>
-                <div class="official-presets-group">
-                  <span class="official-group-tag">Tài chính & Kho vận:</span>
+                </details>
+                <details class="official-presets-group">
+                  <summary class="official-group-tag">Tài chính &amp; Kho vận</summary>
                   <div class="official-presets-list">
                     <button type="button" class="btn-preset-chip" data-preset="paid">ĐÃ THU TIỀN</button>
                     <button type="button" class="btn-preset-chip" data-preset="cash_out">ĐÃ CHI TIỀN</button>
@@ -984,9 +984,9 @@
                     <button type="button" class="btn-preset-chip" data-preset="stock_out">ĐÃ XUẤT KHO</button>
                     <button type="button" class="btn-preset-chip" data-preset="void">HỦY (VOID)</button>
                   </div>
-                </div>
-                <div class="official-presets-group">
-                  <span class="official-group-tag">Hành chính & Duyệt:</span>
+                </details>
+                <details class="official-presets-group">
+                  <summary class="official-group-tag">Hành chính &amp; Duyệt</summary>
                   <div class="official-presets-list">
                     <button type="button" class="btn-preset-chip" data-preset="copy">SAO Y BẢN CHÍNH</button>
                     <button type="button" class="btn-preset-chip" data-preset="duplicate">BẢN SAO</button>
@@ -996,7 +996,7 @@
                     <button type="button" class="btn-preset-chip" data-preset="approved">GIÁM ĐỐC ĐÃ DUYỆT</button>
                     <button type="button" class="btn-preset-chip" data-preset="phone">BÁN HÀNG QUA ĐT</button>
                   </div>
-                </div>
+                </details>
               </div>
 
               <!-- Title & Name Form Inputs -->
@@ -1163,8 +1163,8 @@
                 <button type="button" class="btn btn-tool btn-sm btn-icon-only" id="btnStageZoomIn" title="Phóng to sân khấu (+)">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                 </button>
-                <button type="button" class="btn btn-tool btn-sm" id="btnStageZoomFit" title="Vừa toàn bộ trang">Vừa trang</button>
-                <button type="button" class="btn btn-tool btn-sm" id="btnStageZoomFitWidth" title="Vừa chiều rộng trang">Vừa chiều ngang</button>
+                <button type="button" class="btn btn-tool btn-sm sign-fit-btn" id="btnStageZoomFit" title="Thu phóng vừa toàn bộ trang">Vừa trang</button>
+                <button type="button" class="btn btn-tool btn-sm sign-fit-btn" id="btnStageZoomFitWidth" title="Thu phóng vừa chiều rộng trang">Vừa ngang</button>
               </div>
 
               <div class="sign-nav-right">
