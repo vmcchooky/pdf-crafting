@@ -1022,6 +1022,8 @@ async function loadProjectFile(file) {
     searchInput.value = '';
     clearSearch();
   }
+  // Ngắt observer trước khi xóa hàng loạt để detached DOM không bị giữ tham chiếu
+  thumbnailObserver.disconnect();
   pagesGrid.innerHTML = '';
 
   try {
@@ -1186,7 +1188,8 @@ function snapshotPages() {
   return state.pages.map(p => ({
     ...p,
     groupIds: [...(p.groupIds || [])],
-    stamps: (p.stamps || []).map(s => ({ ...s }))
+    // Bỏ trường runtime _img (Image đã decode, tốn RAM) — vẽ lại lười từ dataUrl khi undo (xem drawStampsOnCanvas)
+    stamps: (p.stamps || []).map(s => stripRuntimeFields(s))
   }));
 }
 
@@ -1853,6 +1856,8 @@ async function loadPdfFiles(files, isAppend = false) {
     }
     thumbnailCache.clear();
     previewCache.clear();
+    // Ngắt observer trước khi xóa hàng loạt để detached DOM không bị giữ tham chiếu
+    thumbnailObserver.disconnect();
     pagesGrid.innerHTML = '';
   }
 
@@ -1987,10 +1992,23 @@ function renderGrid() {
 
   existingCards.forEach((card, pageId) => {
     if (!currentPageIds.has(pageId)) {
+      // Gỡ observer + hủy render dở để detached DOM không bị observer/queue giữ tham chiếu (leak)
+      const wrapper = card.querySelector('.card-thumbnail-wrapper');
+      if (wrapper) { try { thumbnailObserver.unobserve(wrapper); } catch (e) {} }
+      const deadCanvas = card.querySelector('canvas');
+      if (deadCanvas && deadCanvas._pdfRenderTask && typeof deadCanvas._pdfRenderTask.cancel === 'function') {
+        try { deadCanvas._pdfRenderTask.cancel(); } catch (e) {}
+        deadCanvas._pdfRenderTask = null;
+      }
       card.remove();
       existingCards.delete(pageId);
     }
   });
+
+  // Vứt tác vụ thumbnail của card đã rời DOM (tránh decode frame vô ích khi xóa/lọc trang)
+  for (let i = thumbnailRenderQueue.length - 1; i >= 0; i--) {
+    if (!document.body.contains(thumbnailRenderQueue[i].canvas)) thumbnailRenderQueue.splice(i, 1);
+  }
 
   const fragment = document.createDocumentFragment();
 
@@ -2237,6 +2255,215 @@ function setupPagesGridDelegation() {
       e.target.blur();
     }
   });
+
+  // Kéo-thả sắp xếp trang bằng Event Delegation: 6 listener duy nhất cho cả lưới,
+  // thay vì 6 listener/card (500 trang = 3000 listener). Hành vi giữ nguyên bản per-card.
+  const resolveDragCard = (e) => (e.target && e.target.closest ? e.target.closest('.page-card') : null);
+
+  pagesGrid.addEventListener('dragstart', (e) => {
+    const card = resolveDragCard(e);
+    if (!card) return;
+    isUserInteracting = true;
+    const idx = parseInt(card.dataset.index, 10);
+    const draggedPage = state.pages[idx];
+
+    state.draggedIndex = idx;
+
+    // Check if dragging a selected card while multiple cards are selected
+    if (draggedPage && draggedPage.isSelected) {
+      const selectedPages = state.pages.filter(p => p.isSelected);
+      if (selectedPages.length > 1) {
+        state.isMultiDragging = true;
+        // Mark all selected cards with .dragging
+        pagesGrid.querySelectorAll('.page-card.selected').forEach(c => c.classList.add('dragging'));
+
+        // Custom drag ghost badge
+        if (e.dataTransfer && e.dataTransfer.setDragImage) {
+          const dragGhost = document.createElement('div');
+          dragGhost.className = 'multi-drag-badge';
+          dragGhost.textContent = `Di chuyển ${selectedPages.length} trang`;
+          document.body.appendChild(dragGhost);
+          e.dataTransfer.setDragImage(dragGhost, 20, 20);
+          setTimeout(() => dragGhost.remove(), 0);
+        }
+      } else {
+        state.isMultiDragging = false;
+        card.classList.add('dragging');
+      }
+    } else {
+      state.isMultiDragging = false;
+      card.classList.add('dragging');
+    }
+
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', idx);
+  });
+
+  pagesGrid.addEventListener('dragend', () => {
+    pagesGrid.querySelectorAll('.page-card.dragging, .page-card.drag-over-left, .page-card.drag-over-right').forEach(c => {
+      c.classList.remove('dragging', 'drag-over-left', 'drag-over-right');
+    });
+    state.draggedIndex = null;
+    state.isMultiDragging = false;
+    isUserInteracting = false;
+    setTimeout(() => {
+      if (!isUserInteracting) processThumbnailQueue();
+    }, 150);
+  });
+
+  pagesGrid.addEventListener('dragenter', (e) => {
+    const card = resolveDragCard(e);
+    if (!card) return;
+    // Đệm điểm giữa thẻ để dragover không phải gọi getBoundingClientRect() liên tục
+    const rect = card.getBoundingClientRect();
+    card._dragMidX = rect.left + rect.width / 2;
+  });
+
+  pagesGrid.addEventListener('dragover', (e) => {
+    const card = resolveDragCard(e);
+    if (!card) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+
+    const curIndex = parseInt(card.dataset.index, 10);
+    if (state.draggedIndex === null || state.draggedIndex === curIndex) {
+      return;
+    }
+
+    const targetPage = state.pages[curIndex];
+    if (state.isMultiDragging && targetPage && targetPage.isSelected) {
+      card.classList.remove('drag-over-left', 'drag-over-right');
+      return;
+    }
+
+    // So sánh toạ độ chuột với điểm giữa thẻ đã lưu đệm từ dragenter, KHÔNG gọi getBoundingClientRect() lặp lại
+    const isLeftHalf = card._dragMidX > 0 ? (e.clientX < card._dragMidX) : (e.offsetX < card.offsetWidth / 2);
+
+    if (isLeftHalf) {
+      if (!card.classList.contains('drag-over-left')) {
+        card.classList.add('drag-over-left');
+        card.classList.remove('drag-over-right');
+      }
+    } else {
+      if (!card.classList.contains('drag-over-right')) {
+        card.classList.add('drag-over-right');
+        card.classList.remove('drag-over-left');
+      }
+    }
+  });
+
+  pagesGrid.addEventListener('dragleave', (e) => {
+    const card = resolveDragCard(e);
+    if (!card) return;
+    card.classList.remove('drag-over-left', 'drag-over-right');
+  });
+
+  pagesGrid.addEventListener('drop', (e) => {
+    const card = resolveDragCard(e);
+    if (!card) return;
+    e.preventDefault();
+    card.classList.remove('drag-over-left', 'drag-over-right');
+
+    const toIndex = parseInt(card.dataset.index, 10);
+    const targetPage = state.pages[toIndex];
+    if (!targetPage) return;
+
+    saveHistoryState();
+
+    const isLeftHalf = card._dragMidX > 0 ? (e.clientX < card._dragMidX) : (e.offsetX < card.offsetWidth / 2);
+
+    if (state.isMultiDragging) {
+      // Multi-page drag & drop: In-Place DOM Reorder bằng DocumentFragment (<16ms, không renderGrid)
+      if (targetPage.isSelected) return; // Dropping on self
+
+      const selectedPages = state.pages.filter(p => p.isSelected);
+      const otherPages = state.pages.filter(p => !p.isSelected);
+
+      let targetPos = otherPages.indexOf(targetPage);
+      if (targetPos === -1) return;
+
+      if (!isLeftHalf) {
+        targetPos += 1;
+      }
+
+      // Gom các thẻ DOM đang chọn và di chuyển trực tiếp
+      const selectedCards = selectedPages.map(p => pagesGrid.querySelector(`.page-card[data-page-id="${p.id}"]`)).filter(Boolean);
+      const fragment = document.createDocumentFragment();
+      selectedCards.forEach(c => fragment.appendChild(c));
+
+      if (isLeftHalf) {
+        card.before(fragment);
+      } else {
+        card.after(fragment);
+      }
+
+      otherPages.splice(targetPos, 0, ...selectedPages);
+      state.pages = otherPages;
+
+      // Cập nhật lại chỉ số dataset.index và số thứ tự trang cho toàn bộ thẻ DOM
+      const allCards = pagesGrid.querySelectorAll('.page-card');
+      for (let i = 0; i < allCards.length; i++) {
+        const c = allCards[i];
+        c.dataset.index = i;
+        const badge = c.querySelector('.card-num-badge');
+        if (badge) badge.textContent = `#${i + 1}`;
+        const titleInput = c.querySelector('.card-title-input');
+        const pageObj = state.pages[i];
+        if (titleInput && pageObj && (!pageObj.title || pageObj.title.startsWith('#'))) {
+          pageObj.title = `#${i + 1}`;
+          titleInput.value = pageObj.title;
+        }
+      }
+
+      showToast(`Đã di chuyển ${selectedPages.length} trang tới vị trí mới!`, 'success');
+    } else {
+      // Single-page drag & drop: Cập nhật DOM trực tiếp (In-Place DOM Reorder)
+      const fromIndex = state.draggedIndex;
+      if (fromIndex === null || fromIndex === toIndex) return;
+
+      let targetIndex = isLeftHalf ? toIndex : toIndex + 1;
+      if (fromIndex < targetIndex) {
+        targetIndex--;
+      }
+
+      if (fromIndex === targetIndex) return;
+
+      const [movedPage] = state.pages.splice(fromIndex, 1);
+      state.pages.splice(targetIndex, 0, movedPage);
+
+      const draggedCard = pagesGrid.querySelector(`.page-card[data-page-id="${movedPage.id}"]`);
+      if (draggedCard && card) {
+        if (fromIndex < targetIndex) {
+          card.after(draggedCard);
+        } else {
+          card.before(draggedCard);
+        }
+
+        // Cập nhật lại chỉ số dataset.index và số thứ tự trang cho dải thẻ bị ảnh hưởng
+        const minIdx = Math.min(fromIndex, targetIndex);
+        const maxIdx = Math.max(fromIndex, targetIndex);
+        const allCards = pagesGrid.querySelectorAll('.page-card');
+        for (let i = minIdx; i <= maxIdx; i++) {
+          const c = allCards[i];
+          if (c) {
+            c.dataset.index = i;
+            const badge = c.querySelector('.card-num-badge');
+            if (badge) badge.textContent = `#${i + 1}`;
+            const titleInput = c.querySelector('.card-title-input');
+            const pageObj = state.pages[i];
+            if (titleInput && pageObj && (!pageObj.title || pageObj.title.startsWith('#'))) {
+              pageObj.title = `#${i + 1}`;
+              titleInput.value = pageObj.title;
+            }
+          }
+        }
+      } else {
+        renderGrid();
+      }
+
+      showToast(`Đã di chuyển trang tới vị trí #${targetIndex + 1}`, 'success');
+    }
+  });
 }
 
 function createCardElement(pageItem, index) {
@@ -2395,8 +2622,6 @@ function createCardElement(pageItem, index) {
   card.appendChild(groupWrapper);
   card.appendChild(cardFooter);
 
-  attachCardDragEvents(card);
-
   return card;
 }
 
@@ -2445,6 +2670,12 @@ async function processThumbnailQueue() {
 
   activeThumbnailRenders++;
   const task = thumbnailRenderQueue.shift();
+  // Card đã rời DOM trong lúc chờ (xóa/lọc trang) -> bỏ qua, không decode vô ích
+  if (!document.body.contains(task.canvas)) {
+    activeThumbnailRenders--;
+    processThumbnailQueue();
+    return;
+  }
 
   try {
     await renderThumbnailAsync(task.pageItem, task.canvas, task.card);
@@ -2556,203 +2787,7 @@ async function renderThumbnailAsync(pageItem, canvas, card) {
 // Smooth Drag and Drop Logic
 // ==========================================================================
 
-function attachCardDragEvents(card) {
-  let targetCardMidX = 0;
-
-  card.addEventListener('dragstart', (e) => {
-    isUserInteracting = true;
-    const idx = parseInt(card.dataset.index, 10);
-    const draggedPage = state.pages[idx];
-
-    state.draggedIndex = idx;
-
-    // Check if dragging a selected card while multiple cards are selected
-    if (draggedPage && draggedPage.isSelected) {
-      const selectedPages = state.pages.filter(p => p.isSelected);
-      if (selectedPages.length > 1) {
-        state.isMultiDragging = true;
-        // Mark all selected cards with .dragging
-        pagesGrid.querySelectorAll('.page-card.selected').forEach(c => c.classList.add('dragging'));
-
-        // Custom drag ghost badge
-        if (e.dataTransfer && e.dataTransfer.setDragImage) {
-          const dragGhost = document.createElement('div');
-          dragGhost.className = 'multi-drag-badge';
-          dragGhost.textContent = `Di chuyển ${selectedPages.length} trang`;
-          document.body.appendChild(dragGhost);
-          e.dataTransfer.setDragImage(dragGhost, 20, 20);
-          setTimeout(() => dragGhost.remove(), 0);
-        }
-      } else {
-        state.isMultiDragging = false;
-        card.classList.add('dragging');
-      }
-    } else {
-      state.isMultiDragging = false;
-      card.classList.add('dragging');
-    }
-
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', idx);
-  });
-
-  card.addEventListener('dragend', () => {
-    pagesGrid.querySelectorAll('.page-card.dragging, .page-card.drag-over-left, .page-card.drag-over-right').forEach(c => {
-      c.classList.remove('dragging', 'drag-over-left', 'drag-over-right');
-    });
-    state.draggedIndex = null;
-    state.isMultiDragging = false;
-    isUserInteracting = false;
-    setTimeout(() => {
-      if (!isUserInteracting) processThumbnailQueue();
-    }, 150);
-  });
-
-  card.addEventListener('dragenter', () => {
-    const rect = card.getBoundingClientRect();
-    targetCardMidX = rect.left + rect.width / 2;
-  });
-
-  card.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-
-    const curIndex = parseInt(card.dataset.index, 10);
-    if (state.draggedIndex === null || state.draggedIndex === curIndex) {
-      return;
-    }
-
-    const targetPage = state.pages[curIndex];
-    if (state.isMultiDragging && targetPage && targetPage.isSelected) {
-      card.classList.remove('drag-over-left', 'drag-over-right');
-      return;
-    }
-
-    // So sánh toạ độ chuột với điểm giữa thẻ đã lưu đệm từ dragenter, KHÔNG gọi getBoundingClientRect() lặp lại
-    const isLeftHalf = targetCardMidX > 0 ? (e.clientX < targetCardMidX) : (e.offsetX < card.offsetWidth / 2);
-
-    if (isLeftHalf) {
-      if (!card.classList.contains('drag-over-left')) {
-        card.classList.add('drag-over-left');
-        card.classList.remove('drag-over-right');
-      }
-    } else {
-      if (!card.classList.contains('drag-over-right')) {
-        card.classList.add('drag-over-right');
-        card.classList.remove('drag-over-left');
-      }
-    }
-  });
-
-  card.addEventListener('dragleave', () => {
-    card.classList.remove('drag-over-left', 'drag-over-right');
-  });
-
-  card.addEventListener('drop', (e) => {
-    e.preventDefault();
-    card.classList.remove('drag-over-left', 'drag-over-right');
-
-    const toIndex = parseInt(card.dataset.index, 10);
-    const targetPage = state.pages[toIndex];
-    if (!targetPage) return;
-
-    saveHistoryState();
-
-    const isLeftHalf = targetCardMidX > 0 ? (e.clientX < targetCardMidX) : (e.offsetX < card.offsetWidth / 2);
-
-    if (state.isMultiDragging) {
-      // Multi-page drag & drop: In-Place DOM Reorder bằng DocumentFragment (<16ms, không renderGrid)
-      if (targetPage.isSelected) return; // Dropping on self
-
-      const selectedPages = state.pages.filter(p => p.isSelected);
-      const otherPages = state.pages.filter(p => !p.isSelected);
-
-      let targetPos = otherPages.indexOf(targetPage);
-      if (targetPos === -1) return;
-
-      if (!isLeftHalf) {
-        targetPos += 1;
-      }
-
-      // Gom các thẻ DOM đang chọn và di chuyển trực tiếp
-      const selectedCards = selectedPages.map(p => pagesGrid.querySelector(`.page-card[data-page-id="${p.id}"]`)).filter(Boolean);
-      const fragment = document.createDocumentFragment();
-      selectedCards.forEach(c => fragment.appendChild(c));
-
-      if (isLeftHalf) {
-        card.before(fragment);
-      } else {
-        card.after(fragment);
-      }
-
-      otherPages.splice(targetPos, 0, ...selectedPages);
-      state.pages = otherPages;
-
-      // Cập nhật lại chỉ số dataset.index và số thứ tự trang cho toàn bộ thẻ DOM
-      const allCards = pagesGrid.querySelectorAll('.page-card');
-      for (let i = 0; i < allCards.length; i++) {
-        const c = allCards[i];
-        c.dataset.index = i;
-        const badge = c.querySelector('.card-num-badge');
-        if (badge) badge.textContent = `#${i + 1}`;
-        const titleInput = c.querySelector('.card-title-input');
-        const pageObj = state.pages[i];
-        if (titleInput && pageObj && (!pageObj.title || pageObj.title.startsWith('#'))) {
-          pageObj.title = `#${i + 1}`;
-          titleInput.value = pageObj.title;
-        }
-      }
-
-      showToast(`Đã di chuyển ${selectedPages.length} trang tới vị trí mới!`, 'success');
-    } else {
-      // Single-page drag & drop: Cập nhật DOM trực tiếp (In-Place DOM Reorder)
-      const fromIndex = state.draggedIndex;
-      if (fromIndex === null || fromIndex === toIndex) return;
-
-      let targetIndex = isLeftHalf ? toIndex : toIndex + 1;
-      if (fromIndex < targetIndex) {
-        targetIndex--;
-      }
-
-      if (fromIndex === targetIndex) return;
-
-      const [movedPage] = state.pages.splice(fromIndex, 1);
-      state.pages.splice(targetIndex, 0, movedPage);
-
-      const draggedCard = pagesGrid.querySelector(`.page-card[data-page-id="${movedPage.id}"]`);
-      if (draggedCard && card) {
-        if (fromIndex < targetIndex) {
-          card.after(draggedCard);
-        } else {
-          card.before(draggedCard);
-        }
-
-        // Cập nhật lại chỉ số dataset.index và số thứ tự trang cho dải thẻ bị ảnh hưởng
-        const minIdx = Math.min(fromIndex, targetIndex);
-        const maxIdx = Math.max(fromIndex, targetIndex);
-        const allCards = pagesGrid.querySelectorAll('.page-card');
-        for (let i = minIdx; i <= maxIdx; i++) {
-          const c = allCards[i];
-          if (c) {
-            c.dataset.index = i;
-            const badge = c.querySelector('.card-num-badge');
-            if (badge) badge.textContent = `#${i + 1}`;
-            const titleInput = c.querySelector('.card-title-input');
-            const pageObj = state.pages[i];
-            if (titleInput && pageObj && (!pageObj.title || pageObj.title.startsWith('#'))) {
-              pageObj.title = `#${i + 1}`;
-              titleInput.value = pageObj.title;
-            }
-          }
-        }
-      } else {
-        renderGrid();
-      }
-
-      showToast(`Đã di chuyển trang tới vị trí #${targetIndex + 1}`, 'success');
-    }
-  });
-}
+// (đã chuyển sang event delegation trong setupPagesGridDelegation — 0 listener/card)
 
 // ==========================================================================
 // Fullscreen Preview Modal, LRU Cache & Open Single Page in New Tab

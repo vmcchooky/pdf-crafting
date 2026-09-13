@@ -62,4 +62,23 @@ test.describe('PDF Craft Web UI', () => {
     await expect(page.locator('#metaModal')).not.toHaveClass(/active/);
     await expect(page.locator('#btnMetaEdit')).toHaveClass(/btn-accent/);
   });
+
+  test('drag-drop reorder (delegation) changes order + undo restores', async ({ page }) => {
+    await uploadSample(page);
+    const cards = page.locator('.page-card');
+    const firstIdBefore = await cards.first().getAttribute('data-page-id');
+    await page.evaluate(() => {
+      const els = document.querySelectorAll('.page-card');
+      const dt = new DataTransfer();
+      els[0].dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      els[1].dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      els[1].dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, clientX: 100000, dataTransfer: dt }));
+      els[1].dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, clientX: 100000, dataTransfer: dt }));
+      els[0].dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true }));
+    });
+    await expect(page.locator('#btnUndo')).toBeEnabled();
+    expect(await cards.first().getAttribute('data-page-id')).not.toBe(firstIdBefore);
+    await page.locator('#btnUndo').click();
+    expect(await cards.first().getAttribute('data-page-id')).toBe(firstIdBefore);
+  });
 });
