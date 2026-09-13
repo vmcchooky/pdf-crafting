@@ -1,9 +1,11 @@
 package main
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -24,6 +26,7 @@ import (
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
+	"github.com/user/pdfcraft/pkg/pdfcraft"
 )
 
 //go:embed all:web
@@ -105,6 +108,187 @@ func handleOptimizePDF(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// convertSemaphore giới hạn số lượt chuyển đổi Office đồng thời (LibreOffice rất nặng).
+var convertSemaphore = make(chan struct{}, 2)
+
+// findOfficeEngineForWeb cho phép test/gỡ lỗi chèn engine giả qua biến môi trường PDFCRAFT_SOFFICE.
+var findOfficeEngineForWeb = func() string {
+	if p := strings.TrimSpace(os.Getenv("PDFCRAFT_SOFFICE")); p != "" {
+		return p
+	}
+	return pdfcraft.FindOfficeEngine()
+}
+
+func writeConvertError(w http.ResponseWriter, code int, msg string, needLO bool) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success":         false,
+		"needLibreOffice": needLO,
+		"error":           msg,
+	})
+}
+
+// handleConvertOffice nhận file Office tải lên (multipart field "files"),
+// chuyển sang PDF bằng LibreOffice rồi trả về: 1 file PDF trực tiếp,
+// nhiều file -> gói ZIP. Lỗi luôn ở dạng JSON {success:false, error}.
+func handleConvertOffice(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Chỉ chấp nhận phương thức POST", http.StatusMethodNotAllowed)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 150*1024*1024)
+	// 10MB đệm RAM, phần còn lại spill ra file tạm (vẫn bị chặn cứng 150MB ở trên) + RemoveAll sau parse
+	// #nosec G120 -- đã giới hạn: MaxBytesReader 150MB + maxMemory 10MB + RemoveAll file tạm
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "Không đọc được dữ liệu tải lên", http.StatusBadRequest)
+		return
+	}
+	defer r.MultipartForm.RemoveAll()
+	uploads := r.MultipartForm.File["files"]
+	if len(uploads) == 0 {
+		writeConvertError(w, http.StatusBadRequest, "Chưa chọn file Office nào", false)
+		return
+	}
+	if len(uploads) > 10 {
+		writeConvertError(w, http.StatusBadRequest, "Tối đa 10 file mỗi lần chuyển đổi", false)
+		return
+	}
+
+	select {
+	case convertSemaphore <- struct{}{}:
+		defer func() { <-convertSemaphore }()
+	case <-r.Context().Done():
+		return
+	case <-time.After(5 * time.Second):
+		http.Error(w, "Máy chủ đang bận, vui lòng thử lại sau", http.StatusServiceUnavailable)
+		return
+	}
+
+	workDir, err := os.MkdirTemp("", "pdfcraft_web_convert_*")
+	if err != nil {
+		writeConvertError(w, http.StatusInternalServerError, "Không tạo được thư mục tạm", false)
+		return
+	}
+	defer os.RemoveAll(workDir)
+	inDir := filepath.Join(workDir, "in")
+	outDir := filepath.Join(workDir, "out")
+	if err := os.MkdirAll(inDir, 0750); err != nil {
+		writeConvertError(w, http.StatusInternalServerError, "Không tạo được thư mục tạm", false)
+		return
+	}
+
+	inputs := make([]string, 0, len(uploads))
+	for i, fh := range uploads {
+		ext := strings.ToLower(filepath.Ext(fh.Filename))
+		if !pdfcraft.SupportedOfficeExtensions[ext] {
+			writeConvertError(w, http.StatusBadRequest, fmt.Sprintf("Định dạng chưa hỗ trợ: %s", fh.Filename), false)
+			return
+		}
+		if fh.Size > 100*1024*1024 {
+			writeConvertError(w, http.StatusBadRequest, fmt.Sprintf("File quá lớn (>100MB): %s", fh.Filename), false)
+			return
+		}
+		src, err := fh.Open()
+		if err != nil {
+			writeConvertError(w, http.StatusBadRequest, fmt.Sprintf("Không đọc được file: %s", fh.Filename), false)
+			return
+		}
+		// #nosec G304 -- tên file đã rút gọn bằng filepath.Base và ghi vào thư mục tạm riêng của request
+		dst, err := os.Create(filepath.Join(inDir, fmt.Sprintf("%02d_%s", i, filepath.Base(fh.Filename))))
+		if err != nil {
+			_ = src.Close()
+			writeConvertError(w, http.StatusInternalServerError, "Không lưu được file tải lên", false)
+			return
+		}
+		_, copyErr := io.Copy(dst, src)
+		_ = dst.Close()
+		_ = src.Close()
+		if copyErr != nil {
+			writeConvertError(w, http.StatusBadRequest, fmt.Sprintf("Không đọc được file: %s", fh.Filename), false)
+			return
+		}
+		inputs = append(inputs, dst.Name())
+	}
+
+	engine := findOfficeEngineForWeb()
+	if engine == "" {
+		writeConvertError(w, http.StatusNotImplemented,
+			"Máy này chưa cài LibreOffice để chuyển đổi. Hãy cài LibreOffice (https://libreoffice.org) rồi thử lại.", true)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+	type convResult struct {
+		paths []string
+		err   error
+	}
+	resCh := make(chan convResult, 1)
+	go func() {
+		paths, err := pdfcraft.ConvertOfficeToPdf(inputs, outDir, engine, 110)
+		resCh <- convResult{paths: paths, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		writeConvertError(w, http.StatusGatewayTimeout, "Hết thời gian chờ chuyển đổi (120s)", false)
+		return
+	case res := <-resCh:
+		if res.err != nil {
+			writeConvertError(w, http.StatusInternalServerError, fmt.Sprintf("Lỗi chuyển đổi: %v", res.err), false)
+			return
+		}
+		if len(res.paths) == 1 {
+			// #nosec G304 -- đường dẫn do ConvertOfficeToPdf trả về trong thư mục tạm của request
+			data, err := os.ReadFile(res.paths[0])
+			if err != nil {
+				writeConvertError(w, http.StatusInternalServerError, "Không đọc được kết quả chuyển đổi", false)
+				return
+			}
+			outName := strings.TrimSuffix(filepath.Base(res.paths[0]), filepath.Ext(res.paths[0])) + ".pdf"
+			w.Header().Set("Content-Type", "application/pdf")
+			w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename=%q`, outName))
+			w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(data)
+			return
+		}
+		var zipBuf bytes.Buffer
+		zw := zip.NewWriter(&zipBuf)
+		for _, p := range res.paths {
+			// #nosec G304 -- đường dẫn do ConvertOfficeToPdf trả về trong thư mục tạm của request
+			data, err := os.ReadFile(p)
+			if err != nil {
+				_ = zw.Close()
+				writeConvertError(w, http.StatusInternalServerError, "Không đọc được kết quả chuyển đổi", false)
+				return
+			}
+			fw, err := zw.Create(filepath.Base(p))
+			if err != nil {
+				_ = zw.Close()
+				writeConvertError(w, http.StatusInternalServerError, "Không đóng gói được kết quả", false)
+				return
+			}
+			if _, err := fw.Write(data); err != nil {
+				_ = zw.Close()
+				writeConvertError(w, http.StatusInternalServerError, "Không đóng gói được kết quả", false)
+				return
+			}
+		}
+		if err := zw.Close(); err != nil {
+			writeConvertError(w, http.StatusInternalServerError, "Không đóng gói được kết quả", false)
+			return
+		}
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", `attachment; filename="pdfcraft_converted.zip"`)
+		w.Header().Set("Content-Length", strconv.Itoa(zipBuf.Len()))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(zipBuf.Bytes())
+	}
+}
+
 var (
 	initialFilePath string
 	initialFileMu   sync.RWMutex
@@ -177,6 +361,7 @@ func runUI(args []string, initialFile string) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/optimize", handleOptimizePDF)
+	mux.HandleFunc("/api/convert", handleConvertOffice)
 	mux.HandleFunc("/api/shutdown", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))

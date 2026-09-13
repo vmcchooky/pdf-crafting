@@ -386,6 +386,70 @@ const passwordError = document.getElementById('passwordError');
 const btnCancelPasswordModal = document.getElementById('btnCancelPasswordModal');
 const btnUnlockPdf = document.getElementById('btnUnlockPdf');
 
+// Office -> PDF elements
+const btnConvertOffice = document.getElementById('btnConvertOffice');
+const convertFileInput = document.getElementById('convertFileInput');
+
+const OFFICE_EXTS = ['docx', 'doc', 'odt', 'rtf', 'xlsx', 'xls', 'ods', 'csv', 'pptx', 'ppt', 'odp'];
+
+function setupConvertEvents() {
+  if (!btnConvertOffice || !convertFileInput) return;
+  btnConvertOffice.addEventListener('click', () => convertFileInput.click());
+  convertFileInput.addEventListener('change', () => {
+    const files = Array.from(convertFileInput.files || []);
+    convertFileInput.value = '';
+    if (files.length === 0) return;
+    convertOfficeFiles(files);
+  });
+}
+
+async function convertOfficeFiles(files) {
+  const valid = files.filter(f => OFFICE_EXTS.includes(((f.name.split('.').pop() || '').toLowerCase())));
+  if (valid.length === 0) {
+    showToast('Không tìm thấy file Office hợp lệ (docx, xlsx, pptx...)!', 'danger');
+    return;
+  }
+  if (valid.length > 10) {
+    showToast('Tối đa 10 file mỗi lần chuyển đổi!', 'danger');
+    return;
+  }
+  btnConvertOffice.disabled = true;
+  showToast(`Đang chuyển đổi ${valid.length} file Office sang PDF... (cần LibreOffice)`, 'success');
+  try {
+    const form = new FormData();
+    valid.forEach(f => form.append('files', f, f.name));
+    const res = await fetch('/api/convert', { method: 'POST', body: form });
+    if (!res.ok) {
+      let msg = `Chuyển đổi thất bại (HTTP ${res.status})`;
+      try {
+        const errJson = await res.json();
+        if (errJson && errJson.error) msg = errJson.error;
+      } catch (e) { /* giữ message mặc định */ }
+      showToast(msg, 'danger');
+      return;
+    }
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (ct.includes('application/pdf')) {
+      const buf = await res.arrayBuffer();
+      const cd = res.headers.get('content-disposition') || '';
+      const m = cd.match(/filename="?([^";]+)"?/);
+      const name = (m && m[1]) || 'converted.pdf';
+      await loadPdfFiles([new File([buf], name, { type: 'application/pdf' })], true);
+      showToast(`Đã chuyển đổi và nạp: ${name}`, 'success');
+    } else {
+      // ZIP nhiều file -> tải về máy
+      const buf = await res.arrayBuffer();
+      downloadBlob(buf, 'pdfcraft_converted.zip', 'application/zip');
+      showToast(`Đã chuyển đổi ${valid.length} file, đang tải file ZIP...`, 'success');
+    }
+  } catch (err) {
+    console.error('Lỗi chuyển Office sang PDF:', err);
+    showToast('Lỗi chuyển đổi: ' + (err.message || err), 'danger');
+  } finally {
+    btnConvertOffice.disabled = false;
+  }
+}
+
 // Modal Footer actions
 const btnCancelSign = document.getElementById('btnCancelSign');
 const btnSaveSignDone = document.getElementById('btnSaveSignDone');
@@ -404,6 +468,7 @@ function init() {
   setupSignatureEvents();
   setupMetaEvents();
 setupPasswordEvents();
+setupConvertEvents();
   setupSearchEvents();
   setupProjectEvents();
   initColorPicker();

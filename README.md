@@ -178,6 +178,7 @@ convert_office_to_pdf(["a.docx", "b.xlsx"], output_dir="pdf_out/")
 
 - Kéo thả nhiều file, xem trước thumbnail, kéo đổi thứ tự, chọn nhiều (Shift+Click, khung marquee, Ctrl+A).
 - Mở file PDF mã hóa: hộp nhập mật khẩu khi nạp file (thử lại khi sai, bỏ qua khi hủy). Lưu ý: xuất file từ nguồn mã hóa cần giải mã trước (`pdfcraft decrypt`).
+- **Office → PDF**: nút chuyển file Word/Excel/PowerPoint sang PDF ngay trong Web UI (cần LibreOffice, 1 file nạp vào workspace, nhiều file tải về ZIP).
 - Xoay từng trang / xoay hàng loạt đã chọn (phím `R`), đảo ngược, Undo (Ctrl+Z) / Redo (Ctrl+Y).
 - **Tìm kiếm** nội dung toàn tài liệu, không phân biệt dấu (`/` để nhảy tới ô tìm kiếm).
 - Nhóm trang + xuất theo nhóm, tách từng trang, trích xuất đã chọn.
