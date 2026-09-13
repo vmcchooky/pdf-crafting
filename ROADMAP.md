@@ -44,5 +44,5 @@
 ### 11. Form (AcroForm) fill từ CSV/JSON
 - Điền hàng loạt biểu mẫu PDF từ dữ liệu có cấu trúc.
 
-### 12. Nút Office→PDF trong Web UI
-- Upload docx/xlsx → backend convert (tái dùng engine của mục 1) → nạp tiếp vào workspace.
+### 12. Nút Office→PDF trong Web UI — ĐÃ XONG
+- ~~Upload docx/xlsx → backend convert (tái dùng engine của mục 1) → nạp tiếp vào workspace.~~ Đã có: nút "Office → PDF" upload 1–10 file → `POST /api/convert` (tái dùng `ConvertOfficeToPdf`, giới hạn 2 lượt đồng thời) → 1 file nạp thẳng vào workspace, nhiều file tải về ZIP. Thiếu LibreOffice báo lỗi rõ ràng + E2E đường lỗi.

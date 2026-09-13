@@ -106,4 +106,16 @@ test.describe('PDF Craft Web UI', () => {
     await expect(page.locator('#passwordModal')).not.toHaveClass(/active/);
     await expect(page.locator('.page-card')).toHaveCount(0);
   });
+
+  test('office convert rejects non-office file client-side', async ({ page }) => {
+    await page.goto('/web/index.html');
+    await page.setInputFiles('#convertFileInput', path.join(__dirname, 'fixtures', 'invalid.txt'));
+    await expect(page.locator('#toast')).toHaveClass(/toast-danger/);
+  });
+
+  test('office convert shows clear error when backend cannot convert', async ({ page }) => {
+    await page.goto('/web/index.html');
+    await page.setInputFiles('#convertFileInput', path.join(__dirname, 'fixtures', 'invalid.docx'));
+    await expect(page.locator('#toast')).toHaveClass(/toast-danger/, { timeout: 90000 });
+  });
 });
