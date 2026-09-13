@@ -5,8 +5,8 @@ Unit tests for PdfDocument core engine.
 from pathlib import Path
 
 import pytest
-from pdfcraft.core import PdfDocument, parse_page_selection
-from pypdf import PdfReader
+from pdfcraft.core import PdfDocument, merge_pdfs, parse_page_selection
+from pypdf import PdfReader, PdfWriter
 
 
 def test_parse_page_selection():
@@ -310,3 +310,77 @@ def test_consecutive_in_place_saves(sample_pdf_5p: Path):
         assert res.exists()
         reloaded = PdfDocument.open(res)
         assert reloaded.page_count == 5
+
+
+def _make_bookmarked_pdf(path: Path, pages: int, marks: list) -> Path:
+    def add(writer, items, parent=None):
+        for title, page, kids in items:
+            ref = writer.add_outline_item(title, page - 1, parent)
+            add(writer, kids, ref)
+
+    writer = PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(width=595, height=842)
+    add(writer, marks)
+    with open(path, "wb") as f:
+        writer.write(f)
+    return path
+
+
+def test_bookmarks_roundtrip(tmp_path: Path):
+    src = _make_bookmarked_pdf(
+        tmp_path / "bm.pdf",
+        4,
+        [("Chuong 1", 1, [("Muc 1.1", 2, [])]), ("Chuong 2", 4, [])],
+    )
+    doc = PdfDocument.open(src)
+    assert doc.get_bookmarks() == [
+        {
+            "title": "Chuong 1",
+            "page": 1,
+            "kids": [{"title": "Muc 1.1", "page": 2, "kids": []}],
+        },
+        {"title": "Chuong 2", "page": 4, "kids": []},
+    ]
+
+    out = tmp_path / "bm_out.pdf"
+    doc.set_bookmarks([{"title": "Moi", "page": 3, "kids": []}])
+    doc.save(out)
+    assert PdfDocument.open(out).get_bookmarks() == [
+        {"title": "Moi", "page": 3, "kids": []}
+    ]
+
+
+def test_bookmarks_add_clear(tmp_path: Path):
+    src = _make_bookmarked_pdf(tmp_path / "bm.pdf", 3, [])
+    doc = PdfDocument.open(src)
+    assert doc.get_bookmarks() == []
+
+    out = tmp_path / "bm_add.pdf"
+    doc.add_bookmark("Phu luc", 2).save(out)
+    assert PdfDocument.open(out).get_bookmarks() == [
+        {"title": "Phu luc", "page": 2, "kids": []}
+    ]
+
+    out2 = tmp_path / "bm_clear.pdf"
+    PdfDocument.open(out).clear_bookmarks().save(out2)
+    assert PdfDocument.open(out2).get_bookmarks() == []
+
+
+def test_bookmarks_invalid_page(tmp_path: Path):
+    src = _make_bookmarked_pdf(tmp_path / "bm.pdf", 3, [])
+    doc = PdfDocument.open(src)
+    with pytest.raises(ValueError):
+        doc.set_bookmarks([{"title": "Sai", "page": 99, "kids": []}])
+    with pytest.raises(ValueError):
+        doc.set_bookmarks([{"title": "", "page": 1, "kids": []}])
+
+
+def test_merge_preserves_bookmarks(tmp_path: Path):
+    a = _make_bookmarked_pdf(tmp_path / "a.pdf", 3, [("Chuong 1", 1, [])])
+    b = _make_bookmarked_pdf(tmp_path / "b.pdf", 2, [("Phu luc", 2, [])])
+    out = merge_pdfs([a, b], tmp_path / "merged.pdf")
+    assert PdfDocument.open(out).get_bookmarks() == [
+        {"title": "Chuong 1", "page": 1, "kids": []},
+        {"title": "Phu luc", "page": 5, "kids": []},
+    ]

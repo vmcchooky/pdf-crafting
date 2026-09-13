@@ -27,6 +27,72 @@ from pypdf.generic import (
 logger = logging.getLogger(__name__)
 
 
+def _read_outline(reader: PdfReader, items: list[Any]) -> list[dict[str, Any]]:
+    """Đọc outline pypdf (Destination xen kẽ sublist con) thành [{title, page 1-based, kids}]."""
+    result: list[dict[str, Any]] = []
+    for item in items or []:
+        if isinstance(item, list):
+            if result:
+                result[-1]["kids"].extend(_read_outline(reader, item))
+            continue
+        title = str(getattr(item, "title", "") or "")
+        try:
+            dest_page = reader.get_destination_page_number(item)
+            page: int | None = dest_page + 1 if dest_page is not None else None
+        except Exception:  # noqa: BLE001 -- destination hỏng thì ghi nhận None
+            page = None
+        result.append({"title": title, "page": page, "kids": []})
+    return result
+
+
+def _normalize_bookmark(mark: dict[str, Any]) -> dict[str, Any]:
+    """Chuẩn hóa 1 bookmark {title, page 1-based, kids?} (đệ quy)."""
+    if not isinstance(mark, dict):
+        raise TypeError(f"Bookmark phải là dict: {mark!r}")
+    title = str(mark.get("title", "") or "")
+    if not title:
+        raise ValueError("Bookmark thiếu tiêu đề (title)")
+    page = mark.get("page")
+    if page is not None and (not isinstance(page, int) or isinstance(page, bool)):
+        raise ValueError(f"Số trang bookmark phải là số nguyên: {page!r}")
+    kids = [_normalize_bookmark(k) for k in (mark.get("kids") or [])]
+    return {"title": title, "page": page, "kids": kids}
+
+
+def _validate_bookmark_pages(mark: dict[str, Any], page_count: int) -> None:
+    page = mark.get("page")
+    if page is not None and not 1 <= page <= page_count:
+        raise ValueError(
+            f"Bookmark '{mark.get('title')}' trỏ tới trang {page} ngoài phạm vi 1..{page_count}"
+        )
+    for kid in mark.get("kids", []):
+        _validate_bookmark_pages(kid, page_count)
+
+
+def _shift_bookmark(mark: dict[str, Any], offset: int) -> dict[str, Any]:
+    """Dời số trang bookmark sau khi gộp (offset = số trang đã có trước đó)."""
+    page = mark.get("page")
+    return {
+        "title": mark.get("title", ""),
+        "page": (page + offset) if isinstance(page, int) else None,
+        "kids": [_shift_bookmark(k, offset) for k in (mark.get("kids") or [])],
+    }
+
+
+def _write_outline(
+    writer: PdfWriter, marks: Sequence[dict[str, Any]], parent: Any = None
+) -> None:
+    """Ghi outline lồng nhau vào writer (đệ quy, trang 1-based -> 0-based)."""
+    for mark in marks:
+        page = mark.get("page")
+        ref = writer.add_outline_item(
+            str(mark.get("title", "")),
+            (page - 1) if isinstance(page, int) else 0,
+            parent,
+        )
+        _write_outline(writer, mark.get("kids") or [], ref)
+
+
 @dataclass
 class PageInfo:
     """Metadata and geometry information for a single PDF page."""
@@ -188,6 +254,7 @@ class PdfDocument:
         self.file_path: Path | None = Path(file_path).resolve() if file_path else None
         self._pages: list[PageObject] = []
         self._metadata: dict[str, Any] = {}
+        self._pending_bookmarks: list[dict[str, Any]] | None = None
 
         if self.file_path:
             self.load(self.file_path, password=password)
@@ -413,6 +480,55 @@ class PdfDocument:
                 self._metadata[key] = value
         return self
 
+    def get_bookmarks(self, password: str | None = None) -> list[dict[str, Any]]:
+        """
+        Read the document outline from file. Returns nested
+        [{title, page (1-based, None if unresolvable), kids}]. Empty list when none.
+        """
+        if not self.file_path or not self.file_path.is_file():
+            return []
+        with open(self.file_path, "rb") as f:
+            reader = PdfReader(io.BytesIO(f.read()))
+            if reader.is_encrypted:
+                if password is None:
+                    return []
+                try:
+                    if not reader.decrypt(password):
+                        return []
+                except Exception:  # noqa: BLE001 -- sai mật khẩu coi như không đọc được
+                    return []
+            try:
+                return _read_outline(reader, reader.outline)
+            except Exception:
+                logger.debug("đọc outline thất bại", exc_info=True)
+                return []
+
+    def set_bookmarks(self, bookmarks: Sequence[dict[str, Any]]) -> PdfDocument:
+        """
+        Replace the outline on next save(). Each item: {title, page (1-based), kids?}.
+        Call `save()` afterwards to persist.
+        """
+        pending = [_normalize_bookmark(b) for b in bookmarks]
+        for b in pending:
+            _validate_bookmark_pages(b, self.page_count)
+        self._pending_bookmarks = pending
+        return self
+
+    def add_bookmark(self, title: str, page: int) -> PdfDocument:
+        """Append a top-level bookmark. Call `save()` afterwards to persist."""
+        marks = (
+            list(self._pending_bookmarks)
+            if self._pending_bookmarks is not None
+            else self.get_bookmarks()
+        )
+        marks.append({"title": title, "page": page, "kids": []})
+        return self.set_bookmarks(marks)
+
+    def clear_bookmarks(self) -> PdfDocument:
+        """Remove the outline on next save()."""
+        self._pending_bookmarks = []
+        return self
+
     def add_text_watermark(
         self,
         text: str,
@@ -568,6 +684,9 @@ class PdfDocument:
         if self._metadata:
             writer.add_metadata({f"/{k}": v for k, v in self._metadata.items() if v})
 
+        if self._pending_bookmarks:
+            _write_outline(writer, self._pending_bookmarks)
+
         if optimize:
             # Nén trên writer.pages (page đã gắn writer) để tránh DeprecationWarning
             # replace_contents của pypdf 6.x
@@ -639,6 +758,7 @@ def merge_pdfs(input_paths: Sequence[str | Path], output_path: str | Path) -> Pa
     # Ngăn ghi đè nguồn khi output trùng 1 trong các input: dựng writer trước, ghi file tạm rồi replace
     writer = PdfWriter()
     total_pages = 0
+    merged_marks: list[dict[str, Any]] = []
     for src in paths:
         if not src.is_file():
             raise FileNotFoundError(f"Không tìm thấy tệp PDF để gộp: {src}")
@@ -646,12 +766,22 @@ def merge_pdfs(input_paths: Sequence[str | Path], output_path: str | Path) -> Pa
             reader = PdfReader(io.BytesIO(f.read()))
             if len(reader.pages) == 0:
                 raise ValueError(f"Tệp nguồn không có trang nào: {src}")
+            offset = total_pages
             for page in reader.pages:
                 writer.add_page(page)
                 total_pages += 1
+            # Giữ bookmark từng file nguồn, dời số trang theo offset khi gộp
+            try:
+                for mark in _read_outline(reader, reader.outline):
+                    merged_marks.append(_shift_bookmark(mark, offset))
+            except Exception:
+                logger.debug("bỏ qua outline của %s", src, exc_info=True)
 
     if total_pages == 0:
         raise ValueError("Không có trang nào để gộp")
+
+    if merged_marks:
+        _write_outline(writer, merged_marks)
 
     tmp_fd, tmp_name = tempfile.mkstemp(suffix=".pdf", dir=str(out_path.parent))
     tmp_path = Path(tmp_name)

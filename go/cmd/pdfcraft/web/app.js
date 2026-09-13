@@ -386,6 +386,108 @@ const passwordError = document.getElementById('passwordError');
 const btnCancelPasswordModal = document.getElementById('btnCancelPasswordModal');
 const btnUnlockPdf = document.getElementById('btnUnlockPdf');
 
+// Document outline (bookmarks) viewer elements (chỉ đọc; thêm/sửa dùng CLI `bookmark`)
+const btnOutline = document.getElementById('btnOutline');
+const outlineModal = document.getElementById('outlineModal');
+const outlineModalBackdrop = document.getElementById('outlineModalBackdrop');
+const outlineModalClose = document.getElementById('outlineModalClose');
+const outlineList = document.getElementById('outlineList');
+const btnCloseOutlineModal = document.getElementById('btnCloseOutlineModal');
+
+async function resolveOutlineItems(pdfJsDoc, items) {
+  const out = [];
+  for (const item of items || []) {
+    let pageIndex = null;
+    try {
+      // dest dạng chuỗi = named destination (cần resolve), mảng = explicit (dùng trực tiếp —
+      // getDestination của pdf.js KHÔNG nhận explicit array)
+      let dest = item.dest || null;
+      if (typeof dest === 'string') dest = await pdfJsDoc.getDestination(dest);
+      if (Array.isArray(dest) && dest[0]) pageIndex = await pdfJsDoc.getPageIndex(dest[0]);
+    } catch (e) { /* dest hỏng: vẫn hiện tiêu đề, không nhảy được */ }
+    out.push({
+      title: item.title || '(không tên)',
+      pageIndex,
+      kids: await resolveOutlineItems(pdfJsDoc, item.items || []),
+    });
+  }
+  return out;
+}
+
+function appendOutlineNodes(container, items, sourceId, level) {
+  for (const item of items) {
+    const globalIdx = item.pageIndex === null ? -1 :
+      state.pages.findIndex(p => p.sourceId === sourceId && p.pageIndex === item.pageIndex);
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'outline-item';
+    row.style.paddingLeft = `${8 + level * 18}px`;
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'outline-title';
+    titleSpan.textContent = item.title;
+    row.appendChild(titleSpan);
+    if (globalIdx >= 0) {
+      const pageSpan = document.createElement('span');
+      pageSpan.className = 'outline-page';
+      pageSpan.textContent = `#${globalIdx + 1}`;
+      row.appendChild(pageSpan);
+      row.addEventListener('click', () => {
+        outlineModal.classList.remove('active');
+        openPreviewModal(globalIdx);
+      });
+    } else {
+      row.disabled = true;
+    }
+    container.appendChild(row);
+    if (item.kids && item.kids.length > 0) appendOutlineNodes(container, item.kids, sourceId, level + 1);
+  }
+}
+
+async function openOutlineModal() {
+  if (!outlineModal || !outlineList) return;
+  outlineList.innerHTML = '';
+  const loading = document.createElement('p');
+  loading.className = 'dialog-subtext';
+  loading.textContent = 'Đang đọc mục lục...';
+  outlineList.appendChild(loading);
+  outlineModal.classList.add('active');
+
+  outlineList.innerHTML = '';
+  let total = 0;
+  for (const [sourceId, srcObj] of state.sources) {
+    if (!srcObj || !srcObj.pdfJsDoc) continue;
+    let items = [];
+    try {
+      items = await resolveOutlineItems(srcObj.pdfJsDoc, await srcObj.pdfJsDoc.getOutline());
+    } catch (e) { continue; }
+    if (items.length === 0) continue;
+    total += items.length;
+    const section = document.createElement('div');
+    section.className = 'outline-source';
+    const head = document.createElement('div');
+    head.className = 'outline-source-title';
+    head.textContent = srcObj.name || sourceId;
+    section.appendChild(head);
+    appendOutlineNodes(section, items, sourceId, 0);
+    outlineList.appendChild(section);
+  }
+  if (total === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'dialog-subtext';
+    empty.textContent = 'Tài liệu không có bookmark nào.';
+    outlineList.appendChild(empty);
+  }
+}
+
+function setupOutlineEvents() {
+  if (!btnOutline || !outlineModal) return;
+  const close = () => outlineModal.classList.remove('active');
+  btnOutline.addEventListener('click', openOutlineModal);
+  if (outlineModalClose) outlineModalClose.addEventListener('click', close);
+  if (outlineModalBackdrop) outlineModalBackdrop.addEventListener('click', close);
+  if (btnCloseOutlineModal) btnCloseOutlineModal.addEventListener('click', close);
+}
+
 // Office -> PDF elements
 const btnConvertOffice = document.getElementById('btnConvertOffice');
 const convertFileInput = document.getElementById('convertFileInput');
@@ -468,6 +570,7 @@ function init() {
   setupSignatureEvents();
   setupMetaEvents();
 setupPasswordEvents();
+setupOutlineEvents();
 setupConvertEvents();
   setupSearchEvents();
   setupProjectEvents();

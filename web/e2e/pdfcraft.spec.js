@@ -118,4 +118,16 @@ test.describe('PDF Craft Web UI', () => {
     await page.setInputFiles('#convertFileInput', path.join(__dirname, 'fixtures', 'invalid.docx'));
     await expect(page.locator('#toast')).toHaveClass(/toast-danger/, { timeout: 90000 });
   });
+
+  test('outline modal lists bookmarks and jumps to page', async ({ page }) => {
+    await page.goto('/web/index.html');
+    await page.setInputFiles('#fileInput', path.join(__dirname, 'fixtures', 'outline.pdf'));
+    await expect(page.locator('.page-card')).toHaveCount(3, { timeout: 30000 });
+    await page.locator('#btnOutline').click();
+    await expect(page.locator('#outlineModal')).toHaveClass(/active/);
+    await expect(page.locator('.outline-item')).toHaveCount(2);
+    await page.locator('.outline-item').nth(1).click();
+    await expect(page.locator('#previewModal')).toHaveClass(/active/);
+    await expect(page.locator('#modalPageNumBadge')).toHaveText('#3');
+  });
 });

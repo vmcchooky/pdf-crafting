@@ -20,8 +20,8 @@
 - File scan hiện là điểm mù của tìm kiếm + `text`. Tích hợp Tesseract OCR (qua CLI ngoài) hoặc dịch vụ OCR, nhúng text layer vào PDF.
 - Liên quan: benchmark scan đã có (`benchmark.py` mục [4]) để đo hiệu quả.
 
-### 4. Bookmark / Outline (mục lục) editor
-- Đọc, thêm, sửa, xóa bookmark; giữ bookmark khi merge/extract (hiện pdfcpu giữ một phần, cần kiểm chứng).
+### 4. Bookmark / Outline (mục lục) editor — ĐÃ XONG
+- Python (`get/set/add/clear_bookmarks`, `merge_pdfs` giữ bookmark + CLI `bookmark`) và Go (`List/Add/Clear/Export/Import` + CLI `bookmark`) đầy đủ; Go merge giữ bookmark sẵn (pdfcpu). Web UI xem mục lục + nhấp nhảy tới trang (pdf-lib không ghi outline nên thêm/sửa dùng CLI).
 
 ### 5. Chuẩn hóa khổ giấy & resize trang
 - Resize/normalize toàn bộ trang về A4/A5/Letter, căn giữa nội dung, thêm lề trắng.

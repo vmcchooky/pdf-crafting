@@ -346,6 +346,63 @@ def handle_text(args: argparse.Namespace) -> int:
         return 1
 
 
+def _print_bookmarks(marks: list, level: int = 0) -> None:
+    for mark in marks:
+        page = mark.get("page")
+        print(f"{'  ' * level}- {mark.get('title')} (trang {page if page else '?'})")
+        _print_bookmarks(mark.get("kids") or [], level + 1)
+
+
+def handle_bookmark(args: argparse.Namespace) -> int:
+    import json
+
+    try:
+        if args.export:
+            doc = PdfDocument.open(args.input, password=args.password)
+            marks = doc.get_bookmarks(password=args.password)
+            Path(args.export).write_text(
+                json.dumps(marks, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            print(f"[+] Đã xuất {len(marks)} bookmark ra: {args.export}")
+            return 0
+
+        doc = PdfDocument.open(args.input, password=args.password)
+        changed = False
+        if args.import_json:
+            data = json.loads(Path(args.import_json).read_text(encoding="utf-8"))
+            doc.set_bookmarks(
+                data if isinstance(data, list) else data.get("bookmarks", [])
+            )
+            changed = True
+        if args.clear:
+            doc.clear_bookmarks()
+            changed = True
+        if args.add:
+            if not args.page:
+                print("[LỖI] --add cần kèm --page (số trang 1-based)", file=sys.stderr)
+                return 1
+            marks = doc.get_bookmarks(password=args.password)
+            marks.append({"title": args.add, "page": args.page, "kids": []})
+            doc.set_bookmarks(marks)
+            changed = True
+
+        if not changed:
+            marks = doc.get_bookmarks(password=args.password)
+            if not marks:
+                print("(không có bookmark)")
+                return 0
+            _print_bookmarks(marks)
+            return 0
+
+        out_path = args.output or args.input
+        saved = doc.save(out_path)
+        print(f"[+] Thành công! Đã cập nhật bookmark tại: {saved}")
+        return 0
+    except Exception as e:  # noqa: BLE001
+        print(f"[LỖI] {e}", file=sys.stderr)
+        return 1
+
+
 def handle_ui(args: argparse.Namespace) -> int:
     import http.server
     import socketserver
@@ -674,6 +731,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_text.add_argument("--password", help="Mật khẩu mở file (nếu file mã hóa)")
 
+    # bookmark
+    p_bm = subparsers.add_parser(
+        "bookmark", help="Xem/thêm/xóa/xuất/nhập mục lục (bookmark) của file PDF"
+    )
+    p_bm.add_argument("input", help="Đường dẫn file PDF")
+    p_bm.add_argument(
+        "--add", metavar="TITLE", help="Thêm bookmark cấp cao nhất với tiêu đề này"
+    )
+    p_bm.add_argument("--page", type=int, help="Trang đích cho --add (1-based)")
+    p_bm.add_argument("--clear", action="store_true", help="Xóa toàn bộ bookmark")
+    p_bm.add_argument("--export", metavar="JSON", help="Xuất bookmark ra file JSON")
+    p_bm.add_argument(
+        "--import-json",
+        metavar="JSON",
+        dest="import_json",
+        help="Nhập bookmark từ file JSON (thay thế)",
+    )
+    p_bm.add_argument("--password", help="Mật khẩu mở file (nếu file mã hóa)")
+    p_bm.add_argument(
+        "-o",
+        "--output",
+        help="Đường dẫn file kết quả (nếu không chỉ định sẽ ghi đè file gốc)",
+    )
+
     return parser
 
 
@@ -702,6 +783,7 @@ def main(argv: list[str] | None = None) -> int:
         "compress": handle_compress,
         "convert": handle_convert,
         "text": handle_text,
+        "bookmark": handle_bookmark,
         "ui": handle_ui,
         "register-menu": handle_register_menu,
         "unregister-menu": handle_unregister_menu,
