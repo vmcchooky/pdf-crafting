@@ -27,7 +27,7 @@ Công cụ được xây dựng và kiểm thử hoàn chỉnh bằng **Python**
 
 ```
 pdf-crafting/
-├── pdfcraft.exe              # Tệp thực thi độc lập biên dịch từ Go (chạy ngay trên Windows)
+├── pdfcraft.exe              # Artifact phát hành (tải từ GitHub Releases, không commit; build từ Go, xem dưới)
 ├── pyproject.toml            # Đóng gói Python (pip install .)
 ├── .github/workflows/ci.yml  # CI: pytest + go test + node --test
 ├── examples/                 # Tệp PDF mẫu để dùng thử
@@ -221,9 +221,14 @@ Kết quả đo đạc thực tế trên Windows bằng `python benchmark.py` (t
 
 Nếu bạn sửa mã nguồn Go và muốn biên dịch lại:
 ```bash
+python scripts/sync_web.py
 cd go
 go build -ldflags="-s -w" -o ../PDFCraft.exe ./cmd/pdfcraft
 ```
 
-> Lưu ý: exe nhúng Web UI từ `go/cmd/pdfcraft/web/` (embed). Sau khi sửa `web/` (gốc phát triển),
-> hãy copy `index.html`, `app.js`, `utils.js`, `app.css` sang `go/cmd/pdfcraft/web/` rồi mới build exe.
+> Nguồn thật của Web UI là `web/`. Exe nhúng từ `go/cmd/pdfcraft/web/` (embed,
+> `//go:embed all:web` trong `go/cmd/pdfcraft/server.go`), nên bắt buộc chạy
+> `python scripts/sync_web.py` trước khi build — CI (`web-sync`) và Release
+> đều kiểm tra bước này và fail nếu 2 thư mục lệch nhau.
+> File `PDFCraft.exe` không commit vào git; bản chính thức tải từ GitHub Releases
+> (tag `v*` tự build + đính kèm exe).

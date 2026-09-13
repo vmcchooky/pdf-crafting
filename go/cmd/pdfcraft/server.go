@@ -215,6 +215,7 @@ func runUI(args []string, initialFile string) {
 			http.Error(w, "Không có tệp ban đầu", http.StatusNotFound)
 			return
 		}
+		// #nosec G304 -- filePath từ tham số khởi chạy cục bộ (initial-file), không lấy từ HTTP request
 		data, err := os.ReadFile(filePath)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Không thể đọc tệp: %v", err), http.StatusInternalServerError)
@@ -331,6 +332,7 @@ func runUI(args []string, initialFile string) {
 
 				w.Header().Set("Content-Length", strconv.Itoa(len(cached.gzipped)))
 				w.WriteHeader(http.StatusOK)
+				// #nosec G705 -- chỉ ghi bytes từ embed FS nội bộ với Content-Type whitelist, không phản chiếu input người dùng
 				_, _ = w.Write(cached.gzipped)
 				return
 			}
