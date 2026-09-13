@@ -3858,11 +3858,29 @@ function getStoredStampLibrary() {
 }
 
 function saveStoredStampLibrary(list) {
-  try {
-    localStorage.setItem(STAMP_LIB_STORAGE_KEY, JSON.stringify(list.slice(0, 25)));
-  } catch (e) {
-    console.warn('Không thể lưu thư viện con dấu vào localStorage:', e);
+  const arr = Array.isArray(list) ? list.slice(0, 25) : [];
+  // Thử lưu toàn bộ; nếu bộ nhớ trình duyệt đầy (QuotaExceededError) thì
+  // giữ lại dần các mục mới nhất thay vì để lỗi văng ra gây "crash".
+  const attempts = [arr, arr.slice(0, 15), arr.slice(0, 8), arr.slice(0, 3)];
+  for (let i = 0; i < attempts.length; i++) {
+    try {
+      localStorage.setItem(STAMP_LIB_STORAGE_KEY, JSON.stringify(attempts[i]));
+      if (i > 0) {
+        showToast(`Bộ nhớ thư viện đầy, chỉ giữ lại ${attempts[i].length} con dấu mới nhất. Hãy xóa bớt dấu cũ!`, 'danger');
+      }
+      return true;
+    } catch (e) {
+      const isQuota = e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014);
+      if (!isQuota) {
+        console.warn('Không thể lưu thư viện con dấu vào localStorage:', e);
+        return false;
+      }
+      // Còn quota error -> thử mức ít hơn ở vòng lặp tiếp theo.
+    }
   }
+  console.warn('Không thể lưu thư viện con dấu: bộ nhớ trình duyệt đã đầy.');
+  showToast('Không lưu được thư viện: bộ nhớ trình duyệt đã đầy. Hãy xóa bớt ảnh con dấu cũ!', 'danger');
+  return false;
 }
 
 // Chroma & luminance background removal for photos of stamps on white paper
@@ -3911,28 +3929,47 @@ function resizeImageForLibrary(file) {
     reader.onload = (ev) => {
       const img = new Image();
       img.onload = () => {
-        const maxDim = 900;
-        let w = img.naturalWidth;
-        let h = img.naturalHeight;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
-          } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
+        // Nén dần: ảnh quá lớn (PNG 900px có thể > 2MB) vừa tốn RAM vừa làm
+        // đầy localStorage (quota ~5MB) -> tự hạ kích thước tới khi đủ nhỏ.
+        const steps = [900, 640, 450];
+        let stepIdx = 0;
+        const tryEncode = () => {
+          const maxDim = steps[Math.min(stepIdx, steps.length - 1)];
+          let w = img.naturalWidth || maxDim;
+          let h = img.naturalHeight || maxDim;
+          if (!w || !h) {
+            resolve(ev.target.result);
+            return;
           }
-        }
-        const c = document.createElement('canvas');
-        c.width = w;
-        c.height = h;
-        const ctx = c.getContext('2d');
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve(c.toDataURL('image/png'));
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          const c = document.createElement('canvas');
+          c.width = Math.max(1, w);
+          c.height = Math.max(1, h);
+          const ctx = c.getContext('2d');
+          ctx.drawImage(img, 0, 0, c.width, c.height);
+          const url = c.toDataURL('image/png');
+          // Giới hạn ~900KB/ảnh để 25 ảnh không vượt quota localStorage.
+          if (url.length > 900 * 1024 && stepIdx < steps.length - 1) {
+            stepIdx++;
+            tryEncode();
+          } else {
+            resolve(url);
+          }
+        };
+        tryEncode();
       };
       img.onerror = () => resolve(ev.target.result);
       img.src = ev.target.result;
     };
+    reader.onerror = () => resolve(null);
     reader.readAsDataURL(file);
   });
 }
@@ -4542,12 +4579,48 @@ function renderStampLibrary() {
   });
 }
 
-function applyStageZoom(newZoom) {
+let signStageRenderToken = 0;
+
+function applyStageZoom(newZoom, opts = {}) {
+  const prevZoom = signStudioState._lastAppliedZoom || signStudioState.stageZoom || 1.0;
   signStudioState.stageZoom = Math.max(0.25, Math.min(4.0, newZoom));
-  if (signStageContainer) {
-    signStageContainer.style.transform = `scale(${signStudioState.stageZoom})`;
-    signStageContainer.style.transformOrigin = 'center center';
+  const zoom = signStudioState.stageZoom;
+  if (signStageContainer && signStageCanvas) {
+    // Zoom theo kích thước layout thật (KHÔNG dùng transform: scale).
+    // transform: scale chỉ phóng to mặt hình ảnh nhưng khung cuộn vẫn tính
+    // theo kích thước gốc + origin center đẩy nội dung nở đều 2 phía,
+    // khiến đầu trang bị che và không thể cuộn lên xem được.
+    const baseW = signStageCanvas.width || 0;
+    const baseH = signStageCanvas.height || 0;
+    if (baseW > 0 && baseH > 0) {
+      let anchorRX = 0.5;
+      let anchorRY = 0.0;
+      if (signStageViewport && opts.anchor !== 'top') {
+        const oldContentW = Math.max(1, baseW * prevZoom);
+        const oldContentH = Math.max(1, baseH * prevZoom);
+        anchorRX = (signStageViewport.scrollLeft + signStageViewport.clientWidth / 2) / oldContentW;
+        anchorRY = (signStageViewport.scrollTop + signStageViewport.clientHeight / 2) / oldContentH;
+        anchorRX = Math.max(0, Math.min(1, anchorRX));
+        anchorRY = Math.max(0, Math.min(1, anchorRY));
+      }
+      const cssW = Math.max(1, Math.round(baseW * zoom));
+      const cssH = Math.max(1, Math.round(baseH * zoom));
+      signStageContainer.style.width = `${cssW}px`;
+      signStageContainer.style.height = `${cssH}px`;
+      signStageContainer.style.transform = '';
+      signStageContainer.style.transformOrigin = '';
+      if (signStageViewport && opts.anchor !== 'top') {
+        const newScrollLeft = anchorRX * cssW - signStageViewport.clientWidth / 2;
+        const newScrollTop = anchorRY * cssH - signStageViewport.clientHeight / 2;
+        signStageViewport.scrollLeft = Math.max(0, newScrollLeft);
+        signStageViewport.scrollTop = Math.max(0, newScrollTop);
+      } else if (signStageViewport && opts.anchor === 'top') {
+        signStageViewport.scrollTop = 0;
+        signStageViewport.scrollLeft = 0;
+      }
+    }
   }
+  signStudioState._lastAppliedZoom = zoom;
   const pctStr = `${Math.round(signStudioState.stageZoom * 100)}%`;
   if (inputStageZoom && document.activeElement !== inputStageZoom) {
     inputStageZoom.value = pctStr;
@@ -4661,18 +4734,25 @@ function setupSignatureEvents() {
       return;
     }
     const currentList = getStoredStampLibrary();
+    let addedCount = 0;
     for (const file of validFiles) {
       const resizedDataUrl = await resizeImageForLibrary(file);
+      if (!resizedDataUrl) continue;
       currentList.unshift({
         id: 'stamp_lib_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
         name: file.name.replace(/\.[^/.]+$/, ''),
         dataUrl: resizedDataUrl,
         createdAt: Date.now(),
       });
+      addedCount++;
     }
     saveStoredStampLibrary(currentList);
     renderStampLibrary();
-    showToast(`Đã thêm ${validFiles.length} ảnh vào thư viện con dấu!`, 'success');
+    if (addedCount === 0) {
+      showToast('Không đọc được ảnh nào, vui lòng thử tệp khác!', 'danger');
+    } else {
+      showToast(`Đã thêm ${addedCount} ảnh vào thư viện con dấu!`, 'success');
+    }
   };
 
   if (signImageInput) {
@@ -5015,17 +5095,24 @@ function setupSignatureEvents() {
       const hasGrunge = chkOfficialGrunge ? chkOfficialGrunge.checked : true;
       const angle = rngOfficialAngle ? (parseFloat(rngOfficialAngle.value) || 0) : 0;
 
-      const dataUrl = generateOfficialStampDataUrl({
-        title,
-        name,
-        extra,
-        borderType: border,
-        color,
-        hasDate,
-        dateText,
-        hasGrunge,
-        angle,
-      });
+      let dataUrl = null;
+      try {
+        dataUrl = generateOfficialStampDataUrl({
+          title,
+          name,
+          extra,
+          borderType: border,
+          color,
+          hasDate,
+          dateText,
+          hasGrunge,
+          angle,
+        });
+      } catch (genErr) {
+        console.error('Lỗi khi tạo ảnh con dấu:', genErr);
+        showToast('Không tạo được ảnh con dấu, vui lòng thử nội dung ngắn hơn!', 'danger');
+        return;
+      }
       if (!dataUrl) return;
 
       const list = getStoredStampLibrary();
@@ -5361,17 +5448,23 @@ function handlePlaceStampOnPage() {
     const hasGrunge = chkOfficialGrunge ? chkOfficialGrunge.checked : true;
     const angle = rngOfficialAngle ? (parseFloat(rngOfficialAngle.value) || 0) : 0;
 
-    dataUrl = generateOfficialStampDataUrl({
-      title,
-      name,
-      extra,
-      borderType: border,
-      color,
-      hasDate,
-      dateText,
-      hasGrunge,
-      angle,
-    });
+    try {
+      dataUrl = generateOfficialStampDataUrl({
+        title,
+        name,
+        extra,
+        borderType: border,
+        color,
+        hasDate,
+        dateText,
+        hasGrunge,
+        angle,
+      });
+    } catch (genErr) {
+      console.error('Lỗi khi tạo ảnh con dấu:', genErr);
+      showToast('Không tạo được ảnh con dấu, vui lòng thử nội dung ngắn hơn!', 'danger');
+      return;
+    }
   }
 
   if (!dataUrl) return;
@@ -5554,12 +5647,19 @@ function saveAndCloseSignStudio() {
 
 async function renderSignStage() {
   if (signStudioState.pageIndex < 0 || signStudioState.pageIndex >= state.pages.length) return;
+  const myToken = ++signStageRenderToken;
+  // Hủy tác vụ vẽ cũ còn dở để chuyển trang nhanh không bị race / crash.
+  if (signStageCanvas && signStageCanvas._pdfRenderTask && typeof signStageCanvas._pdfRenderTask.cancel === 'function') {
+    try { signStageCanvas._pdfRenderTask.cancel(); } catch (e) {}
+    signStageCanvas._pdfRenderTask = null;
+  }
   const pageItem = state.pages[signStudioState.pageIndex];
   const srcObj = state.sources.get(pageItem.sourceId);
   if (!srcObj) return;
 
   try {
     const page = await srcObj.pdfJsDoc.getPage(pageItem.pageIndex + 1);
+    if (myToken !== signStageRenderToken) { try { page.cleanup(); } catch (e) {} return; }
     const totalRot = (page.rotate + pageItem.rotation) % 360;
     const unscaled = page.getViewport({ scale: 1.0, rotation: totalRot });
     const maxDim = Math.max(unscaled.width, unscaled.height);
@@ -5569,10 +5669,26 @@ async function renderSignStage() {
     signStageCanvas.width = Math.max(1, Math.floor(viewport.width));
     signStageCanvas.height = Math.max(1, Math.floor(viewport.height));
     const ctx = signStageCanvas.getContext('2d');
-    await page.render({ canvasContext: ctx, viewport }).promise;
+    const renderTask = page.render({ canvasContext: ctx, viewport });
+    signStageCanvas._pdfRenderTask = renderTask;
+    try {
+      await renderTask.promise;
+    } catch (renderErr) {
+      // Bỏ qua lỗi hủy render do chuyển trang/zoom nhanh (không phải crash thật).
+      if (renderErr && (renderErr.name === 'RenderingCancelledException' || /cancel/i.test(renderErr.message || ''))) {
+        return;
+      }
+      throw renderErr;
+    } finally {
+      if (signStageCanvas._pdfRenderTask === renderTask) signStageCanvas._pdfRenderTask = null;
+    }
+    if (myToken !== signStageRenderToken) return;
+    // Đồng bộ lại kích thước layout theo zoom hiện tại (giữ nguyên mức zoom).
+    applyStageZoom(signStudioState.stageZoom, { anchor: 'top' });
 
     renderSignStageStamps();
   } catch (err) {
+    if (myToken !== signStageRenderToken) return;
     console.error('Lỗi khi hiển thị trang trong Studio ký:', err);
   }
 }
