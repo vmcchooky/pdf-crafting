@@ -5527,7 +5527,18 @@ function setupStampBoxInteractivity(boxEl, stamp) {
     selectStamp(stamp.id);
   });
 
+  // Gộp nhiều pointermove trong 1 frame: mỗi frame chỉ đọc layout + vẽ 1 lần (chống giật khi kéo nhanh)
+  let moveRaf = 0;
+  let pendingMoveEvent = null;
   const onPointerMove = (e) => {
+    pendingMoveEvent = e;
+    if (!moveRaf) moveRaf = requestAnimationFrame(flushPointerMove);
+  };
+  const flushPointerMove = () => {
+    moveRaf = 0;
+    const e = pendingMoveEvent;
+    pendingMoveEvent = null;
+    if (!e) return;
     const overlayRect = signStageOverlay.getBoundingClientRect();
     if (!overlayRect.width || !overlayRect.height) return;
 
@@ -5611,6 +5622,7 @@ function setupStampBoxInteractivity(boxEl, stamp) {
   };
 
   const onPointerUp = () => {
+    if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; pendingMoveEvent = null; }
     if (isDragging) {
       isDragging = false;
       boxEl.classList.remove('dragging');
@@ -5653,8 +5665,18 @@ function setupStampBoxInteractivity(boxEl, stamp) {
       isRotating = true;
       try { rotHandle.setPointerCapture(e.pointerId); } catch (err) {}
 
+      // Gộp xoay theo frame để không đọc layout + vẽ quá 1 lần/frame
+      let rotRaf = 0;
+      let pendingRotEvent = null;
       const onRotMove = (ev) => {
-        if (!isRotating) return;
+        pendingRotEvent = ev;
+        if (!rotRaf) rotRaf = requestAnimationFrame(flushRotMove);
+      };
+      const flushRotMove = () => {
+        rotRaf = 0;
+        const ev = pendingRotEvent;
+        pendingRotEvent = null;
+        if (!isRotating || !ev) return;
         const rect = boxEl.getBoundingClientRect();
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
@@ -5676,6 +5698,7 @@ function setupStampBoxInteractivity(boxEl, stamp) {
 
       const onRotUp = (ev) => {
         isRotating = false;
+        if (rotRaf) { cancelAnimationFrame(rotRaf); rotRaf = 0; pendingRotEvent = null; }
         try { rotHandle.releasePointerCapture(ev.pointerId); } catch (err) {}
         window.removeEventListener('pointermove', onRotMove);
         window.removeEventListener('pointerup', onRotUp);
