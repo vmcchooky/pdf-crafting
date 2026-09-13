@@ -10,6 +10,7 @@ Một công cụ chuyên dụng, tốc độ cao cho phép thao tác các tệp 
 - **Thêm trang từ tệp khác** vào vị trí chỉ định (`insert`).
 - **Xóa trang** khỏi tệp PDF (`delete`).
 - **Mã hóa / giải mã** bằng mật khẩu (`encrypt`, `decrypt` — tương thích chéo Python ↔ Go).
+- **Mục lục bookmark**: xem/sửa (`bookmark` list/add/clear/export/import JSON, giữ nguyên khi gộp file), xem trong Web UI.
 - **Sửa metadata** Tiêu đề/Tác giả/Chủ đề... (`meta`, qua Web UI).
 - **Đóng dấu chìm chữ** DRAFT/BẢN NHÁP... (`watermark`).
 - **Tối ưu giảm dung lượng** không mất dữ liệu (`compress`).
@@ -36,12 +37,12 @@ pdf-crafting/
 │   │   ├── __init__.py
 │   │   ├── core.py           # Core logic (đọc, tách, gộp, xoay, merge, mã hóa, metadata, watermark, nén)
 │   │   ├── office.py         # Chuyển Office sang PDF hàng loạt (LibreOffice headless)
-│   │   ├── cli.py            # Giao diện dòng lệnh Python (15 lệnh)
+│   │   ├── cli.py            # Giao diện dòng lệnh Python (17 lệnh)
 │   │   └── __main__.py       # Entry point cho `python -m pdfcraft` / lệnh `pdfcraft`
 │   └── tests/                # Bộ test tự động bằng pytest
 ├── go/                       # Bản refactor Go (pdfcpu engine + ledongthuc/pdf cho text)
 │   ├── go.mod
-│   ├── cmd/pdfcraft/         # CLI Go + server Web UI (initial-file, context-menu, /api/optimize)
+│   ├── cmd/pdfcraft/         # CLI Go (17 lệnh) + server Web UI (initial-file, context-menu, /api/optimize, /api/convert)
 │   └── pkg/pdfcraft/         # Thư viện Go & bộ unit test Go (document.go, office.go)
 ├── web/                      # Giao diện Web UI kéo thả (100% offline)
 │   ├── index.html
@@ -95,6 +96,8 @@ Bạn có thể chạy trực tiếp `pdfcraft.exe` trên terminal/PowerShell m�
 .\pdfcraft.exe encrypt doc.pdf --user-pw secret123 -o doc_enc.pdf
 .\pdfcraft.exe decrypt doc_enc.pdf --password secret123 -o doc.pdf
 .\pdfcraft.exe meta doc.pdf --title "Bao cao Q3" --author "PDF Craft" -o doc_meta.pdf
+.\pdfcraft.exe bookmark doc.pdf
+.\pdfcraft.exe bookmark doc.pdf --add "Ket luan" --page 5 -o doc_bm.pdf
 .\pdfcraft.exe watermark doc.pdf --text "DRAFT" --pages 1-2 --font-size 48 --rotation 45 --opacity 0.3 -o doc_wm.pdf
 .\pdfcraft.exe compress doc.pdf -o doc_small.pdf
 ```
@@ -127,7 +130,7 @@ pip install .
 # hoặc dùng trực tiếp: $env:PYTHONPATH="python"; python -m pdfcraft ...
 ```
 
-### Dòng lệnh (đủ 14 lệnh, cú pháp tương đương bản Go):
+### Dòng lệnh (đủ 17 lệnh, cú pháp tương đương bản Go):
 ```bash
 python -m pdfcraft info examples/sample_doc.pdf [--password ...]
 python -m pdfcraft text examples/sample_doc.pdf --page 1
@@ -142,6 +145,7 @@ python -m pdfcraft delete examples/sample_doc.pdf --pages 2,4 -o del_py.pdf
 python -m pdfcraft encrypt doc.pdf --user-pw secret123 -o enc.pdf
 python -m pdfcraft decrypt enc.pdf --password secret123 -o doc.pdf
 python -m pdfcraft meta doc.pdf --title "Tieu de" --author "Toi" -o doc_meta.pdf
+python -m pdfcraft bookmark doc.pdf --add "Ket luan" --page 5 -o doc_bm.pdf
 python -m pdfcraft watermark doc.pdf --text "DRAFT" --pages 1-2 -o doc_wm.pdf
 python -m pdfcraft compress doc.pdf -o doc_small.pdf
 python -m pdfcraft convert a.docx b.xlsx -d ./pdf_out/

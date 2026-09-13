@@ -187,3 +187,40 @@ def test_cli_text(sample_pdf_5p: Path, capsys):
     assert ret == 0
     captured = capsys.readouterr()
     assert "Doc1 Page 3" in captured.out
+
+
+def test_cli_bookmark(sample_pdf_5p: Path, tmp_path: Path, capsys):
+    out = tmp_path / "cli_bm.pdf"
+    assert (
+        main(
+            [
+                "bookmark",
+                str(sample_pdf_5p),
+                "--add",
+                "Ket luan",
+                "--page",
+                "5",
+                "-o",
+                str(out),
+            ]
+        )
+        == 0
+    )
+    assert out.exists()
+
+    assert main(["bookmark", str(out)]) == 0
+    assert "Ket luan (trang 5)" in capsys.readouterr().out
+
+    exp = tmp_path / "bm.json"
+    assert main(["bookmark", str(out), "--export", str(exp)]) == 0
+    assert "Ket luan" in exp.read_text(encoding="utf-8")
+
+    out2 = tmp_path / "cli_bm2.pdf"
+    assert main(["bookmark", str(out), "--import-json", str(exp), "-o", str(out2)]) == 0
+    assert main(["bookmark", str(out2)]) == 0
+    assert "Ket luan (trang 5)" in capsys.readouterr().out
+
+    out3 = tmp_path / "cli_bm3.pdf"
+    assert main(["bookmark", str(out2), "--clear", "-o", str(out3)]) == 0
+    assert main(["bookmark", str(out3)]) == 0
+    assert "không có bookmark" in capsys.readouterr().out

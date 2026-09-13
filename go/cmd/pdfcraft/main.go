@@ -26,6 +26,7 @@ func printUsage() {
 	fmt.Println("  rotate  <tệp.pdf> -pages <1,3-4> -angle <90> [-o <đích>]  Xoay trang theo bội số của 90 độ")
 	fmt.Println("  merge   <a.pdf> <b.pdf> [...] -o <kết_quả.pdf>  Gộp nhiều file PDF theo đúng thứ tự")
 	fmt.Println("  text    <tệp.pdf> [--page <n> | -pages <1,3>] [--password <pw>]  Trích xuất nội dung văn bản")
+	fmt.Println("  bookmark <tệp.pdf> [--add <t> --page <n>] [--clear] [--export <f.json>] [--import-json <f.json>] [-o <đích>]  Xem/sửa mục lục")
 	fmt.Println("  encrypt <tệp.pdf> --user-pw <pw> [--owner-pw <pw>] [-o <đích>]  Mã hóa file PDF bằng mật khẩu")
 	fmt.Println("  decrypt <tệp.pdf> --password <pw> [-o <đích>]  Giải mã file PDF về bản không mật khẩu")
 	fmt.Println("  meta    <tệp.pdf> [--title <t>] [--author <t>] ... [-o <đích>]  Sửa metadata tài liệu")
@@ -147,6 +148,8 @@ func main() {
 		runMerge(os.Args[2:])
 	case "text":
 		runText(os.Args[2:])
+	case "bookmark":
+		runBookmark(os.Args[2:])
 	case "encrypt":
 		runEncrypt(os.Args[2:])
 	case "decrypt":
@@ -560,6 +563,95 @@ func sortInts(a []int) {
 			a[j], a[j-1] = a[j-1], a[j]
 		}
 	}
+}
+
+func printBookmarkTree(marks []pdfcraft.Bookmark, level int) {
+	for _, m := range marks {
+		fmt.Printf("%s- %s (trang %d)\n", strings.Repeat("  ", level), m.Title, m.Page)
+		printBookmarkTree(m.Kids, level+1)
+	}
+}
+
+func runBookmark(args []string) {
+	fs := flag.NewFlagSet("bookmark", flag.ExitOnError)
+	addTitle := fs.String("add", "", "Thêm bookmark cấp cao nhất với tiêu đề này")
+	page := fs.Int("page", 0, "Trang đích cho --add (1-based)")
+	clear := fs.Bool("clear", false, "Xóa toàn bộ bookmark")
+	exportJSON := fs.String("export", "", "Xuất bookmark ra file JSON")
+	importJSON := fs.String("import-json", "", "Nhập bookmark từ file JSON (thay thế)")
+	password := fs.String("password", "", "Mật khẩu mở file (nếu file mã hóa)")
+	outFile := fs.String("o", "", "Đường dẫn file kết quả (ghi đè file gốc nếu để trống)")
+	tail := parseFlagsAndArgs(fs, args)
+
+	if len(tail) < 1 {
+		fmt.Println("Cách dùng: pdfcraft bookmark <tệp.pdf> [--add <tiêu_đề> --page <n>] [--clear] [--export <f.json>] [--import-json <f.json>] [--password <mật_khẩu>] [-o <kết_quả.pdf>]")
+		os.Exit(1)
+	}
+	inFile := tail[0]
+	targetOut := *outFile
+	if targetOut == "" {
+		targetOut = inFile
+	}
+
+	if *exportJSON != "" {
+		data, err := pdfcraft.ExportBookmarks(inFile, *password)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
+			os.Exit(1)
+		}
+		if err := os.WriteFile(*exportJSON, data, 0600); err != nil {
+			fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("[+] Đã xuất bookmark ra: %s\n", *exportJSON)
+		return
+	}
+
+	if *importJSON != "" {
+		// #nosec G304 -- đọc file JSON do người dùng chỉ định
+		data, err := os.ReadFile(*importJSON)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
+			os.Exit(1)
+		}
+		if err := pdfcraft.ImportBookmarks(inFile, targetOut, data, *password); err != nil {
+			fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("[+] Thành công! Đã nhập bookmark tại: %s\n", targetOut)
+		return
+	}
+	if *clear {
+		if err := pdfcraft.ClearBookmarks(inFile, targetOut, *password); err != nil {
+			fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("[+] Thành công! Đã xóa bookmark tại: %s\n", targetOut)
+		return
+	}
+	if *addTitle != "" {
+		if *page <= 0 {
+			fmt.Fprintln(os.Stderr, "[LỖI] --add cần kèm --page (số trang 1-based)")
+			os.Exit(1)
+		}
+		if err := pdfcraft.AddBookmark(inFile, targetOut, *addTitle, *page, *password); err != nil {
+			fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("[+] Thành công! Đã cập nhật bookmark tại: %s\n", targetOut)
+		return
+	}
+
+	marks, err := pdfcraft.ListBookmarks(inFile, *password)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
+		os.Exit(1)
+	}
+	if len(marks) == 0 {
+		fmt.Println("(không có bookmark)")
+		return
+	}
+	printBookmarkTree(marks, 0)
 }
 
 func runEncrypt(args []string) {
