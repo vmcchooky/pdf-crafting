@@ -13,8 +13,8 @@
 
 ## 📋 Hàng đợi tính năng (chưa lên lịch chi tiết)
 
-### 2. Mở file PDF mã hóa ngay trong Web UI
-- Hiện tại chỉ CLI đọc được (`--password`). Web cần hộp nhập mật khẩu khi nạp file mã hóa (pdf.js hỗ trợ `password` trong `getDocument`).
+### 2. Mở file PDF mã hóa ngay trong Web UI — ĐÃ XONG
+- ~~Hiện tại chỉ CLI đọc được (`--password`).~~ Web đã có hộp nhập mật khẩu khi nạp file mã hóa (pdf.js `password` trong `getDocument`, thử lại khi sai, bỏ qua khi hủy) + E2E. Giới hạn: xuất file từ nguồn mã hóa cần `pdfcraft decrypt` trước (pdf-lib không giải mã).
 
 ### 3. OCR cho file scan (scan → searchable text)
 - File scan hiện là điểm mù của tìm kiếm + `text`. Tích hợp Tesseract OCR (qua CLI ngoài) hoặc dịch vụ OCR, nhúng text layer vào PDF.

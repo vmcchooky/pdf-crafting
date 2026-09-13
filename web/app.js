@@ -376,6 +376,16 @@ const inputMetaSubject = document.getElementById('inputMetaSubject');
 const inputMetaKeywords = document.getElementById('inputMetaKeywords');
 const inputMetaCreator = document.getElementById('inputMetaCreator');
 
+// Encrypted PDF password prompt elements
+const passwordModal = document.getElementById('passwordModal');
+const passwordModalBackdrop = document.getElementById('passwordModalBackdrop');
+const passwordModalClose = document.getElementById('passwordModalClose');
+const passwordFileName = document.getElementById('passwordFileName');
+const passwordInput = document.getElementById('passwordInput');
+const passwordError = document.getElementById('passwordError');
+const btnCancelPasswordModal = document.getElementById('btnCancelPasswordModal');
+const btnUnlockPdf = document.getElementById('btnUnlockPdf');
+
 // Modal Footer actions
 const btnCancelSign = document.getElementById('btnCancelSign');
 const btnSaveSignDone = document.getElementById('btnSaveSignDone');
@@ -393,6 +403,7 @@ function init() {
   setupCompressEvents();
   setupSignatureEvents();
   setupMetaEvents();
+setupPasswordEvents();
   setupSearchEvents();
   setupProjectEvents();
   initColorPicker();
@@ -1855,13 +1866,83 @@ function setupModalEvents() {
 // Loading & Multi-File Ingestion
 // ==========================================================================
 
+// Mở file PDF mã hóa: bắt PasswordException của pdf.js -> hỏi mật khẩu -> thử lại.
+// Trả về { doc, password } hoặc null khi người dùng bỏ qua file.
+function isPasswordException(err) {
+  return !!err && (err.name === 'PasswordException' ||
+    (typeof err.message === 'string' && /password/i.test(err.message)));
+}
+
+let passwordModalResolve = null;
+
+function setupPasswordEvents() {
+  if (!passwordModal) return;
+  const cancel = () => {
+    passwordModal.classList.remove('active');
+    if (passwordModalResolve) { passwordModalResolve(null); passwordModalResolve = null; }
+  };
+  const unlock = () => {
+    if (!passwordInput) return;
+    passwordModal.classList.remove('active');
+    if (passwordModalResolve) { passwordModalResolve(passwordInput.value || ''); passwordModalResolve = null; }
+  };
+  if (passwordModalClose) passwordModalClose.addEventListener('click', cancel);
+  if (passwordModalBackdrop) passwordModalBackdrop.addEventListener('click', cancel);
+  if (btnCancelPasswordModal) btnCancelPasswordModal.addEventListener('click', cancel);
+  if (btnUnlockPdf) btnUnlockPdf.addEventListener('click', unlock);
+  if (passwordInput) passwordInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); unlock(); }
+    else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+  });
+}
+
+function promptPdfPassword(fileName, wasWrong) {
+  return new Promise((resolve) => {
+    if (!passwordModal || !passwordInput) { resolve(null); return; }
+    passwordModalResolve = resolve;
+    if (passwordFileName) passwordFileName.textContent = `\u201C${fileName}\u201D yêu cầu mật khẩu để mở.`;
+    if (passwordError) passwordError.style.display = wasWrong ? 'block' : 'none';
+    passwordInput.value = '';
+    passwordModal.classList.add('active');
+    setTimeout(() => passwordInput.focus(), 50);
+  });
+}
+
+async function openPdfWithPassword(fileName, masterBuffer) {
+  try {
+    const doc = await pdfjsLib.getDocument({ data: masterBuffer.slice(0) }).promise;
+    return { doc, password: '' };
+  } catch (err) {
+    if (!isPasswordException(err)) throw err;
+  }
+  let wasWrong = false;
+  while (true) {
+    const pw = await promptPdfPassword(fileName, wasWrong);
+    if (pw === null) return null; // người dùng bỏ qua file
+    try {
+      const doc = await pdfjsLib.getDocument({ data: masterBuffer.slice(0), password: pw }).promise;
+      return { doc, password: pw };
+    } catch (err) {
+      if (!isPasswordException(err)) throw err;
+      wasWrong = true; // sai mật khẩu, hỏi lại
+    }
+  }
+}
+
 // formatBytes: dùng chung từ utils.js.
 // Nạp lười (Lazy Load) tài liệu pdf-lib theo yêu cầu khi xuất PDF, không chặn luồng vẽ ban đầu
 async function getSourcePdfLibDoc(srcObj) {
   if (!srcObj) return null;
   await ensurePdfLibLoaded();
   if (!srcObj.pdfLibDoc) {
-    srcObj.pdfLibDoc = await PDFLib.PDFDocument.load(srcObj.bytes.slice(0));
+    try {
+      srcObj.pdfLibDoc = await PDFLib.PDFDocument.load(srcObj.bytes.slice(0));
+    } catch (err) {
+      if (srcObj.password) {
+        throw new Error('File mã hóa: Web UI chưa hỗ trợ xuất file có mật khẩu, hãy giải mã trước bằng lệnh `pdfcraft decrypt`');
+      }
+      throw err;
+    }
   }
   return srcObj.pdfLibDoc;
 }
@@ -1915,12 +1996,19 @@ async function loadPdfFiles(files, isAppend = false) {
       const arrayBuffer = await file.arrayBuffer();
       const sourceId = 'src_' + (nextId++);
 
+      // File mã hóa: hỏi mật khẩu (thử lại khi sai, bỏ qua khi hủy)
       // Truyền bản sao slice(0) cho Worker của pdf.js để tránh Worker chiếm và detach master buffer
-      const pdfJsDoc = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
+      const opened = await openPdfWithPassword(file.name, arrayBuffer);
+      if (!opened) {
+        showToast(`Đã bỏ qua file mã hóa: ${file.name}`, 'success');
+        continue;
+      }
+      const pdfJsDoc = opened.doc;
 
       const srcObj = {
         name: file.name,
         bytes: arrayBuffer,
+        password: opened.password,
         pdfJsDoc,
         pdfLibDoc: null, // Nạp lười khi xuất PDF
         fileSize: file.size,

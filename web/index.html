@@ -1242,6 +1242,34 @@
       </div>
     </div>
 
+    <!-- Encrypted PDF Password Prompt -->
+    <div class="modal" id="passwordModal">
+      <div class="modal-backdrop" id="passwordModalBackdrop"></div>
+      <div class="modal-content" style="max-width: 420px;">
+        <div class="modal-header">
+          <h3>File PDF được mã hóa</h3>
+          <button class="modal-close" id="passwordModalClose">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body modal-dialog-body">
+          <p class="dialog-subtext" id="passwordFileName"></p>
+          <p class="dialog-subtext" id="passwordError" style="display: none; color: #f87171;">Mật khẩu chưa đúng, vui lòng thử lại.</p>
+          <div class="form-group" style="margin-bottom: 8px;">
+            <label class="form-label" for="passwordInput">Mật khẩu:</label>
+            <input type="password" id="passwordInput" class="form-input" placeholder="Nhập mật khẩu file PDF" autocomplete="off">
+          </div>
+          <div class="dialog-actions">
+            <button class="btn btn-tool" id="btnCancelPasswordModal">Bỏ qua file</button>
+            <button class="btn btn-primary" id="btnUnlockPdf">Mở khóa</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Toast Notification -->
     <div class="toast" id="toast"></div>
   </div>
