@@ -6,6 +6,8 @@ const { test, expect } = require('@playwright/test');
 const path = require('path');
 
 const FIXTURE = path.join(__dirname, 'fixtures', 'sample.pdf');
+const ENCRYPTED_FIXTURE = path.join(__dirname, 'fixtures', 'encrypted.pdf');
+const ENCRYPTED_PASSWORD = 'e2e-pdfcraft';
 
 async function uploadSample(page) {
   await page.goto('/web/index.html');
@@ -80,5 +82,28 @@ test.describe('PDF Craft Web UI', () => {
     expect(await cards.first().getAttribute('data-page-id')).not.toBe(firstIdBefore);
     await page.locator('#btnUndo').click();
     expect(await cards.first().getAttribute('data-page-id')).toBe(firstIdBefore);
+  });
+
+  test('encrypted PDF prompts password, rejects wrong one, unlocks with correct one', async ({ page }) => {
+    await page.goto('/web/index.html');
+    await page.setInputFiles('#fileInput', ENCRYPTED_FIXTURE);
+    await expect(page.locator('#passwordModal')).toHaveClass(/active/);
+
+    await page.fill('#passwordInput', 'sai-mat-khau');
+    await page.locator('#btnUnlockPdf').click();
+    await expect(page.locator('#passwordError')).toBeVisible();
+
+    await page.fill('#passwordInput', ENCRYPTED_PASSWORD);
+    await page.locator('#btnUnlockPdf').click();
+    await expect(page.locator('.page-card')).toHaveCount(2, { timeout: 30000 });
+  });
+
+  test('encrypted PDF can be skipped when password cancelled', async ({ page }) => {
+    await page.goto('/web/index.html');
+    await page.setInputFiles('#fileInput', ENCRYPTED_FIXTURE);
+    await expect(page.locator('#passwordModal')).toHaveClass(/active/);
+    await page.locator('#btnCancelPasswordModal').click();
+    await expect(page.locator('#passwordModal')).not.toHaveClass(/active/);
+    await expect(page.locator('.page-card')).toHaveCount(0);
   });
 });
