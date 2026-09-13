@@ -29,8 +29,8 @@
 ### 6. Redact (che/bôi đen văn bản vĩnh viễn)
 - Tìm text (tái dùng search engine) → phủ đen + xóa text gốc khỏi content stream.
 
-### 7. Linearize / Web-optimized (Fast Web View)
-- Xuất PDF linearized để xem trực tuyến nhanh (`pdfcpu` hỗ trợ linearize khi ghi).
+### 7. Linearize / Web-optimized (Fast Web View) — TẠM GÁC (không khả thi với dep hiện tại)
+- Đã kiểm chứng 13/09/2026: `pdfcpu` (kể cả bản mới nhất v0.15.0) chỉ ĐỌC file linearized, không có API ghi (`xreftable.go`: "Linearization section (not yet supported)"); `pypdf` và `pdf-lib` (đã dùng `useObjectStreams`) cũng không ghi linearized. Ghi linearize thủ công quá rủi ro. Mở lại khi pdfcpu hỗ trợ ghi hoặc chấp nhận thêm dep ngoài (qpdf) — đi ngược tiêu chí nhẹ nên để cuối.
 
 ### 8. Tách theo kích thước / bookmark (`split-by-size`, `split-by-bookmark`)
 - Chia file lớn thành nhiều file con theo dung lượng hoặc theo mục lục.
