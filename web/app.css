@@ -1819,11 +1819,11 @@ body.is-marquee-selecting * {
 }
 
 /* ==========================================================================
-   Digital Signature & Stamp Studio Styles
+   Digital Signature & Stamp Studio Styles (redesign)
    ========================================================================== */
 
 .modal.modal-xl .modal-content {
-  max-width: 1240px;
+  max-width: 1320px;
   width: 96%;
   max-height: 94vh;
 }
@@ -1832,6 +1832,9 @@ body.is-marquee-selecting * {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  max-width: none;
+  width: min(1320px, 96vw);
+  height: 92vh;
 }
 
 .sign-brand-icon {
@@ -1850,54 +1853,251 @@ body.is-marquee-selecting * {
   font-size: 0.8rem;
   color: var(--text-muted);
   margin-left: 6px;
+  white-space: nowrap;
 }
 
-/* (Khối .sign-studio-body / .sign-panel / .sign-tabs cũ đã gộp vào
-   "Modal Studio Layout & Tabs" bên dưới để tránh định nghĩa trùng lặp.) */
-
-/* Tab 1: Draw Pad */
-.sign-pad-container {
-  position: relative;
-  background: #ffffff;
-  border-radius: var(--radius-md);
-  border: 2px dashed rgba(99, 102, 241, 0.4);
+/* ---------- Studio shell: rail + panel + stage ---------- */
+.sign-studio-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 68px minmax(320px, 380px) 1fr;
   overflow: hidden;
-  cursor: crosshair;
-  touch-action: none;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  min-height: 0;
 }
 
-#signPadCanvas {
-  width: 100%;
-  height: 170px;
-  display: block;
+/* Vertical tool rail */
+.sign-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 12px 8px;
+  background: rgba(9, 13, 22, 0.95);
+  border-right: 1px solid var(--border-subtle);
+  flex-shrink: 0;
 }
 
-.sign-pad-hint {
-  position: absolute;
-  inset: 0;
+.sign-rail-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+}
+
+.sign-rail-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border-subtle);
+}
+
+.sign-rail-btn.active {
+  color: #ffffff;
+  background: linear-gradient(160deg, rgba(99, 102, 241, 0.28), rgba(139, 92, 246, 0.18));
+  border-color: rgba(99, 102, 241, 0.55);
+  box-shadow: 0 0 14px var(--primary-glow);
+}
+
+.sign-rail-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #94a3b8;
-  font-size: 0.85rem;
-  font-weight: 500;
-  pointer-events: none;
-  transition: opacity 0.2s ease;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
 }
 
-.sign-tools-row {
+.sign-rail-btn.active .sign-rail-icon {
+  background: rgba(99, 102, 241, 0.35);
+}
+
+.sign-rail-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: center;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+/* Tool panel */
+.sign-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+}
+
+.sign-panel-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.sign-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sign-section {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px;
+}
+
+.sign-section-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.sign-section-title-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  margin-top: 10px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
+.sign-section-title-row .sign-section-title {
+  margin-bottom: 0;
+}
+
+.sign-section-title-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sign-section-title-inline strong {
+  font-size: 0.82rem;
+  color: var(--text-primary);
+}
+
+.sign-hint {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin: -4px 0 8px;
+  line-height: 1.4;
+}
+
+/* Sticky action dock at bottom of panel */
+.sign-actions-dock {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: linear-gradient(180deg, rgba(16, 22, 38, 0.92), var(--bg-surface));
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.sign-opacity-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.sign-opacity-row .form-label {
+  margin: 0;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.sign-opacity-row .form-range {
+  width: 100%;
+  min-width: 0;
+}
+
+.sign-opacity-val {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #a5b4fc;
+  min-width: 38px;
+  text-align: right;
+}
+
+#btnPlaceStampOnPage {
+  width: 100%;
+  justify-content: center;
+  padding: 11px 14px;
+}
+
+/* Upload zone */
+.sign-upload-zone {
+  border: 2px dashed rgba(99, 102, 241, 0.35);
+  border-radius: var(--radius-md);
+  padding: 18px 12px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: rgba(99, 102, 241, 0.04);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.sign-upload-zone:hover,
+.sign-upload-zone.drag-over {
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.sign-upload-icon {
+  color: var(--primary);
+}
+
+.sign-upload-zone p {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-top: 4px;
+}
+
+.sign-upload-zone span {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.sign-upload-browse {
+  margin-top: 8px;
+  cursor: pointer;
+}
+
+/* Color dots */
 .sign-color-picker {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sign-color-label {
+  margin: 0 4px 0 0;
 }
 
 .sign-color-dot {
@@ -1907,6 +2107,7 @@ body.is-marquee-selecting * {
   border: 2px solid transparent;
   cursor: pointer;
   outline: none;
+  padding: 0;
   transition: transform 0.12s ease, border-color 0.12s ease;
 }
 
@@ -1920,178 +2121,27 @@ body.is-marquee-selecting * {
   box-shadow: 0 0 10px rgba(99, 102, 241, 0.6);
 }
 
-.sign-stroke-ctrl {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.78rem;
-  color: var(--text-secondary);
-}
-
-.sign-stroke-ctrl input[type="range"] {
-  width: 70px;
-}
-
-/* Modal Studio Layout & Tabs */
-.sign-studio-content {
-  max-width: 96vw;
-  width: 1280px;
-  height: 90vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.sign-studio-body {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-}
-
-.sign-panel {
-  width: 440px;
-  min-width: 380px;
-  max-width: 460px;
-  background: var(--bg-surface);
-  border-right: 1px solid var(--border-subtle);
-  padding: 16px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  overflow-y: auto;
-  flex-shrink: 0;
-}
-
-.sign-tabs {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-  background: rgba(15, 23, 42, 0.7);
-  padding: 3px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-subtle);
-  flex-shrink: 0;
-}
-
-.sign-tab {
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 0.74rem;
-  font-weight: 700;
-  padding: 7px 4px;
-  border-radius: 4px;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  transition: all 0.14s ease;
-  white-space: nowrap;
-}
-
-.sign-tab:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.sign-tab.active {
-  color: #ffffff;
-  background: var(--primary);
-  box-shadow: 0 2px 8px var(--primary-glow);
-}
-
-/* Tab 1: Draw Pad */
-.sign-pad-container {
-  position: relative;
-  background: #f8fafc;
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.35);
-  line-height: 0;
-  border: 1.5px solid rgba(255, 255, 255, 0.1);
-  transition: border-color 0.15s ease;
-}
-
-.sign-pad-container:focus-within, .sign-pad-container:hover {
-  border-color: rgba(99, 102, 241, 0.5);
-}
-
-#signPadCanvas {
-  display: block;
-  width: 100%;
-  height: 160px;
-  cursor: crosshair;
-  touch-action: none;
-}
-
-.sign-pad-hint {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: #94a3b8;
-  font-size: 0.82rem;
-  font-weight: 500;
-  pointer-events: none;
-  user-select: none;
-  white-space: nowrap;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* Tab 2: Upload Zone & Multi-Stamp Library */
-.sign-upload-zone {
-  border: 2px dashed rgba(99, 102, 241, 0.35);
-  border-radius: var(--radius-md);
-  padding: 16px 12px;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  background: rgba(255, 255, 255, 0.02);
-  transition: border-color 0.15s ease, background-color 0.15s ease;
-}
-
-.sign-upload-zone:hover, .sign-upload-zone.drag-over {
-  border-color: var(--primary);
-  background: rgba(99, 102, 241, 0.08);
-}
-
-.sign-upload-zone p {
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin-top: 4px;
-}
-
-.sign-upload-zone span {
-  font-size: 0.72rem;
-  color: var(--text-secondary);
-}
-
+/* Library */
 .stamp-library-section {
-  margin-top: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  margin-top: 0;
 }
 
 .stamp-library-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
 .btn-text-danger {
   background: none;
   border: none;
   color: #f87171;
-  font-size: 0.75rem;
+  font-size: 0.74rem;
+  font-family: inherit;
   cursor: pointer;
-  padding: 2px 4px;
+  padding: 2px 6px;
   border-radius: 4px;
   transition: background var(--transition-fast);
 }
@@ -2102,9 +2152,9 @@ body.is-marquee-selecting * {
 
 .stamp-library-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(115px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
   gap: 8px;
-  max-height: 200px;
+  max-height: 240px;
   overflow-y: auto;
   padding-right: 2px;
 }
@@ -2114,11 +2164,12 @@ body.is-marquee-selecting * {
   font-size: 0.76rem;
   color: var(--text-muted);
   font-style: italic;
-  padding: 12px;
+  padding: 14px 12px;
   text-align: center;
   background: rgba(255, 255, 255, 0.02);
   border-radius: var(--radius-sm);
   border: 1px dashed var(--border-subtle);
+  line-height: 1.45;
 }
 
 .stamp-lib-card {
@@ -2134,15 +2185,40 @@ body.is-marquee-selecting * {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   position: relative;
   transition: all 0.15s ease;
+  cursor: pointer;
 }
 
 .stamp-lib-card:hover {
-  border-color: var(--primary);
+  border-color: rgba(99, 102, 241, 0.65);
   transform: translateY(-2px);
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.25);
 }
 
-/* Transparency Checkerboard for transparent PNG awareness */
+.stamp-lib-card.selected {
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, 0.12);
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.45), 0 4px 14px rgba(99, 102, 241, 0.3);
+}
+
+.stamp-lib-card.selected::after {
+  content: '\2713';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  z-index: 2;
+}
+
 .stamp-lib-thumb {
   width: 100%;
   height: 56px;
@@ -2159,7 +2235,6 @@ body.is-marquee-selecting * {
   background-position: 0 0, 0 5px, 5px -5px, -5px 0px;
   border-radius: 4px;
   overflow: hidden;
-  cursor: pointer;
   border: 1px solid rgba(0, 0, 0, 0.1);
 }
 
@@ -2170,7 +2245,7 @@ body.is-marquee-selecting * {
 }
 
 .stamp-lib-title {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 600;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -2188,14 +2263,38 @@ body.is-marquee-selecting * {
 }
 
 .stamp-lib-actions .btn {
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   padding: 3px 4px;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
-/* Tab 3: Cursive Type Signature */
+/* Type signature */
+.sign-type-live-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88px;
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.sign-type-live-sample {
+  font-size: 2rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 .sign-font-options {
   display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
@@ -2212,6 +2311,7 @@ body.is-marquee-selecting * {
   align-items: center;
   position: relative;
   overflow: hidden;
+  font-family: inherit;
 }
 
 .sign-font-card:hover {
@@ -2226,8 +2326,12 @@ body.is-marquee-selecting * {
   box-shadow: 0 0 12px rgba(99, 102, 241, 0.35);
 }
 
+.sign-font-card-wide {
+  grid-column: span 2;
+}
+
 .sign-font-name-tag {
-  font-size: 0.64rem;
+  font-size: 0.62rem;
   font-weight: 700;
   text-transform: uppercase;
   color: #94a3b8;
@@ -2236,96 +2340,72 @@ body.is-marquee-selecting * {
 }
 
 .sign-font-sample {
-  font-size: 1.25rem;
+  font-size: 1.2rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   display: block;
   line-height: 1.3;
+  width: 100%;
+  text-align: center;
 }
 
-/* Tab 4: Official Stamp Builder */
+.sign-type-actions-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Official stamp builder */
+.official-preview-section {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(20, 28, 48, 0.98);
+}
+
 .official-presets-bar {
+  padding: 10px;
+}
+
+.official-presets-scroller {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: 10px 10px 6px;
+  gap: 8px;
+  max-height: 150px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
-.official-presets-title {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.official-presets-group {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: rgba(15, 23, 42, 0.5);
-  overflow: hidden;
-}
-
-.official-presets-group[open] {
-  border-color: rgba(99, 102, 241, 0.45);
-}
-
-.official-group-tag {
-  font-size: 0.78rem;
-  font-weight: 700;
+.official-preset-group-label {
+  font-size: 0.68rem;
+  font-weight: 800;
   text-transform: uppercase;
-  color: var(--text-secondary);
-  letter-spacing: 0.04em;
-  padding: 8px 10px;
-  cursor: pointer;
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  user-select: none;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-top: 2px;
 }
 
-.official-group-tag::-webkit-details-marker {
-  display: none;
-}
-
-.official-group-tag::marker {
-  content: '';
-}
-
-.official-group-tag::before {
-  content: '▸';
-  font-size: 0.7rem;
-  color: var(--primary);
-  transition: transform 0.15s ease;
-}
-
-.official-presets-group[open] > .official-group-tag::before {
-  transform: rotate(90deg);
-}
-
-.official-group-tag:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.03);
+.official-preset-group-label:first-child {
+  margin-top: 0;
 }
 
 .official-presets-list {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 2px 10px 10px;
 }
 
 .btn-preset-chip {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border-subtle);
   color: var(--text-secondary);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 600;
-  padding: 6px 12px;
+  font-family: inherit;
+  padding: 5px 11px;
   border-radius: 999px;
   cursor: pointer;
   transition: all 0.12s ease;
@@ -2344,25 +2424,13 @@ body.is-marquee-selecting * {
   border-color: var(--primary);
 }
 
-.official-preview-container {
-  background: rgba(255, 255, 255, 0.03);
-  padding: 10px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-}
-
 .official-stamp-display {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  min-height: 150px;
-  max-height: 190px;
+  min-height: 130px;
+  max-height: 170px;
   padding: 12px 10px;
   background: #ffffff;
   border-radius: 6px;
@@ -2453,20 +2521,105 @@ body.is-marquee-selecting * {
   margin: 2px 0;
 }
 
-/* Props & Stamp placement */
-.sign-props-section {
-  padding-top: 10px;
-  border-top: 1px solid var(--border-subtle);
-  flex-shrink: 0;
+.official-date-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
 }
 
+.sign-inline-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sign-date-format {
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  width: auto;
+  max-width: 100%;
+}
+
+.sign-date-input-row {
+  width: 100%;
+}
+
+.sign-date-input-row .form-input {
+  font-size: 0.76rem;
+  padding: 3px 8px;
+}
+
+.sign-official-controls {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 12px;
+}
+
+.sign-control-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sign-control-col .form-label {
+  margin: 0;
+}
+
+.sign-control-col .form-select {
+  width: 100%;
+}
+
+.sign-official-toggles {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sign-angle-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+
+.sign-angle-row input[type="range"] {
+  width: 80px;
+}
+
+.sign-angle-row #lblOfficialAngle {
+  font-size: 0.72rem;
+  color: #a5b4fc;
+  min-width: 24px;
+  font-weight: 700;
+}
+
+/* Page stamps summary (in dock) */
 .sign-stamps-summary {
-  padding-top: 10px;
-  border-top: 1px solid var(--border-subtle);
+  padding-top: 4px;
+  border-top: 1px dashed var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sign-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
 }
 
 .sign-summary-title {
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -2474,7 +2627,7 @@ body.is-marquee-selecting * {
 }
 
 .sign-stamp-badge {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 700;
   padding: 2px 7px;
   border-radius: 999px;
@@ -2483,22 +2636,36 @@ body.is-marquee-selecting * {
 }
 
 .sign-empty-hint {
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   color: var(--text-muted);
   font-style: italic;
   padding: 4px 0;
+}
+
+.sign-stamps-list {
+  max-height: 110px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
 .sign-stamp-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 5px 8px;
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border-subtle);
-  margin-bottom: 5px;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.sign-stamp-item:hover {
+  border-color: rgba(99, 102, 241, 0.45);
 }
 
 .sign-stamp-item img {
@@ -2508,16 +2675,36 @@ body.is-marquee-selecting * {
   background: #ffffff;
   border-radius: 3px;
   padding: 2px;
+  flex-shrink: 0;
 }
 
-/* Right Stage */
+.sign-stamp-item-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sign-stamp-item-left span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#btnClearPageStamps {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Right stage */
 .sign-stage-area {
-  flex: 1;
   display: flex;
   flex-direction: column;
   background: #080c16;
   position: relative;
   overflow: hidden;
+  min-width: 0;
+  min-height: 0;
 }
 
 .sign-stage-nav {
@@ -2530,14 +2717,21 @@ body.is-marquee-selecting * {
   flex-shrink: 0;
   gap: 8px 12px;
   flex-wrap: wrap;
-  min-height: 57px;
+  min-height: 52px;
   box-sizing: border-box;
 }
 
-.sign-nav-left {
+.sign-nav-segment {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+}
+
+.sign-nav-left {
   flex-shrink: 0;
 }
 
@@ -2545,17 +2739,29 @@ body.is-marquee-selecting * {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--text-primary);
   flex-shrink: 0;
 }
 
+.sign-page-select-wrapper .form-select {
+  max-width: 180px;
+  font-size: 0.78rem;
+}
+
 .sign-nav-right {
-  display: flex;
-  align-items: center;
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+.sign-apply-all {
+  font-size: 0.78rem;
+  margin: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .sign-fit-btn {
@@ -2564,16 +2770,8 @@ body.is-marquee-selecting * {
   padding: 3px 8px;
 }
 
-/* Advanced Zoom bar with editable % input and dropdown presets */
 .sign-stage-zoom-bar {
-  display: flex;
-  align-items: center;
   gap: 4px;
-  background: rgba(15, 23, 42, 0.85);
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-subtle);
-  backdrop-filter: blur(8px);
 }
 
 .stage-zoom-input-wrap {
@@ -2689,7 +2887,6 @@ body.is-marquee-selecting * {
   transition: none;
 }
 
-/* Floating Mini Toolbar for active selected stamp */
 .stamp-floating-toolbar {
   position: absolute;
   display: flex;
@@ -2712,6 +2909,7 @@ body.is-marquee-selecting * {
   gap: 4px;
   font-size: 0.72rem;
   font-weight: 600;
+  font-family: inherit;
   color: #cbd5e1;
   background: transparent;
   border: none;
@@ -2738,8 +2936,6 @@ body.is-marquee-selecting * {
   margin: 0 2px;
 }
 
-/* (Old .sign-stage-container removed — definition consolidated above with margin: 0 auto) */
-
 #signStageCanvas {
   display: block;
   width: 100%;
@@ -2753,7 +2949,6 @@ body.is-marquee-selecting * {
   pointer-events: none;
 }
 
-/* Draggable, Resizable & Rotatable Stamp Box with Selection State */
 .stamp-box {
   position: absolute;
   border: 1.5px dashed transparent;
@@ -2795,7 +2990,6 @@ body.is-marquee-selecting * {
   display: block;
 }
 
-/* Handles only display when stamp-box is ACTIVE (Selected) */
 .stamp-box .stamp-handle,
 .stamp-box .stamp-handle-rot,
 .stamp-box .stamp-del-btn {
@@ -2803,8 +2997,7 @@ body.is-marquee-selecting * {
 }
 
 .stamp-box.active .stamp-handle,
-.stamp-box.active .stamp-handle-rot,
-.stamp-box.active .stamp-del-btn {
+.stamp-box.active .stamp-handle-rot {
   display: block;
 }
 
@@ -2847,7 +3040,6 @@ body.is-marquee-selecting * {
   cursor: nwse-resize;
 }
 
-/* Rotation handle */
 .stamp-handle-rot {
   position: absolute;
   top: -24px;
@@ -2901,10 +3093,11 @@ body.is-marquee-selecting * {
 
 /* Footer */
 .sign-modal-footer {
-  padding: 12px 20px;
+  padding: 10px 18px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   flex-shrink: 0;
@@ -2912,15 +3105,58 @@ body.is-marquee-selecting * {
 
 .sign-footer-hint {
   color: var(--text-secondary);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  min-width: 0;
 }
 
 .sign-footer-hint code {
   background: rgba(255, 255, 255, 0.08);
   padding: 1px 5px;
   border-radius: 3px;
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   color: #c7d2fe;
+}
+
+.sign-footer-actions {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* Responsive */
+@media (max-width: 1100px) {
+  .sign-studio-body {
+    grid-template-columns: 56px minmax(280px, 340px) 1fr;
+  }
+
+  .sign-rail-label {
+    font-size: 0.56rem;
+  }
+
+  .sign-footer-hint {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .sign-studio-body {
+    grid-template-columns: 52px 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .sign-rail {
+    grid-row: 1 / -1;
+  }
+
+  .sign-panel {
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .sign-stage-area {
+    min-height: 280px;
+  }
 }
 
 /* Signed Badge on Card */
