@@ -2194,6 +2194,11 @@ body.is-marquee-selecting * {
   box-shadow: 0 4px 14px rgba(99, 102, 241, 0.25);
 }
 
+.stamp-lib-card:focus-visible {
+  border-color: var(--primary);
+  outline: none;
+}
+
 .stamp-lib-card.selected {
   border-color: var(--primary);
   background: rgba(99, 102, 241, 0.12);
@@ -3122,6 +3127,137 @@ body.is-marquee-selecting * {
   display: flex;
   gap: 10px;
   flex-shrink: 0;
+}
+
+/* ---------- UX polish: focus, place state, empty stage, pulse ---------- */
+.sign-rail-btn:focus-visible,
+.sign-font-card:focus-visible,
+.btn-preset-chip:focus-visible,
+.sign-color-dot:focus-visible,
+.stamp-lib-card:focus-visible,
+#btnPlaceStampOnPage:focus-visible,
+.sign-upload-browse:focus-visible,
+.sign-stamp-item:focus-visible {
+  outline: 2px solid #818cf8;
+  outline-offset: 2px;
+}
+
+#btnPlaceStampOnPage:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.35);
+  box-shadow: none;
+}
+
+#btnPlaceStampOnPage.is-ready:not(:disabled) {
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
+}
+
+.sign-stage-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  padding: 24px;
+  color: var(--text-secondary);
+  background: radial-gradient(ellipse at center, rgba(99, 102, 241, 0.08), transparent 70%);
+  pointer-events: none;
+}
+
+.sign-stage-empty[hidden] {
+  display: none !important;
+}
+
+.sign-stage-empty svg {
+  color: var(--primary);
+  opacity: 0.85;
+}
+
+.sign-stage-empty strong {
+  font-size: 0.92rem;
+  color: var(--text-primary);
+}
+
+.sign-stage-empty span {
+  font-size: 0.78rem;
+  max-width: 320px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.stamp-box.just-placed {
+  animation: stampPlacePulse 0.55s ease-out;
+}
+
+@keyframes stampPlacePulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.75);
+  }
+  70% {
+    box-shadow: 0 0 0 12px rgba(99, 102, 241, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+  }
+}
+
+.sign-stamp-item.selected {
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, 0.14);
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.35);
+}
+
+.sign-stamp-opacity {
+  color: #a5b4fc;
+  font-weight: 700;
+}
+
+.sign-apply-all {
+  position: relative;
+  transition: color 0.15s ease;
+}
+
+.sign-apply-all-warn {
+  display: none;
+  font-size: 0.78rem;
+}
+
+.sign-apply-all.is-on {
+  color: #fbbf24;
+}
+
+.sign-apply-all.is-on .sign-apply-all-warn {
+  display: inline;
+  animation: applyAllBlink 1.2s ease-in-out infinite;
+}
+
+.sign-apply-all.is-on span:not(.sign-apply-all-warn) {
+  font-weight: 700;
+}
+
+@keyframes applyAllBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.sign-panel-scroll {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stamp-box.just-placed,
+  .sign-apply-all.is-on .sign-apply-all-warn {
+    animation: none;
+  }
+
+  .sign-panel-scroll {
+    scroll-behavior: auto;
+  }
 }
 
 /* Responsive */

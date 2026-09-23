@@ -19,6 +19,10 @@ test.describe('Sign Studio redesign', () => {
     await expect(page.locator('.sign-rail')).toBeVisible();
     await expect(page.locator('#tabUpload')).toHaveClass(/active/);
 
+    // Empty stage hint + place disabled when library empty & name empty
+    await expect(page.locator('#signStageEmptyHint')).toBeVisible();
+    await expect(page.locator('#btnPlaceStampOnPage')).toBeDisabled();
+
     // Switch to type tab
     await page.locator('#tabType').click();
     await expect(page.locator('#tabType')).toHaveClass(/active/);
@@ -27,9 +31,11 @@ test.describe('Sign Studio redesign', () => {
 
     // Type a name and place
     await page.fill('#signTypeName', 'Tran Van Test');
+    await expect(page.locator('#btnPlaceStampOnPage')).toBeEnabled();
     await page.locator('#btnPlaceStampOnPage').click();
     await expect(page.locator('.stamp-box')).toHaveCount(1, { timeout: 10000 });
     await expect(page.locator('#signStampCountBadge')).toContainText('1');
+    await expect(page.locator('#signStageEmptyHint')).toBeHidden();
 
     // Official tab switch
     await page.locator('#tabOfficial').click();

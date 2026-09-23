@@ -4538,6 +4538,7 @@ function renderStampLibrary() {
         Chưa có ảnh con dấu nào trong thư viện. Bạn có thể tải lên nhiều ảnh (dấu công ty, dấu chức danh, chữ ký scan...) để dùng lại bất kỳ lúc nào!
       </div>
     `;
+    updateSignPlaceButton();
     return;
   }
 
@@ -4545,6 +4546,7 @@ function renderStampLibrary() {
   if (!list.some(x => x.id === signStudioState.selectedLibId)) {
     signStudioState.selectedLibId = list[0].id;
   }
+  updateSignPlaceButton();
 
   stampLibraryGrid.innerHTML = '';
   list.forEach(item => {
@@ -4573,10 +4575,17 @@ function renderStampLibrary() {
       stampLibraryGrid.querySelectorAll('.stamp-lib-card').forEach(c => {
         c.classList.toggle('selected', c.dataset.libId === signStudioState.selectedLibId);
       });
+      updateSignPlaceButton();
     };
     card.addEventListener('click', (e) => {
       if (e.target.closest('button')) return;
       selectThis();
+    });
+    // Double-click = đặt ngay lên trang (shortcut phổ biến với thư viện ảnh)
+    card.addEventListener('dblclick', (e) => {
+      if (e.target.closest('button')) return;
+      selectThis();
+      addStampToCurrentPage(item.dataUrl);
     });
     card.querySelector('.stamp-lib-thumb').addEventListener('click', selectThis);
     card.querySelector('.stamp-lib-title').addEventListener('click', selectThis);
@@ -4737,6 +4746,17 @@ function selectStamp(stampId) {
       box.classList.toggle('active', box.dataset.stampId === stampId);
     });
   }
+  // Đồng bộ thanh opacity với dấu đang chọn để người dùng chỉnh ngay được
+  const stamp = signStudioState.currentStamps.find(s => s.id === stampId);
+  if (stamp && signOpacity) {
+    const pct = Math.round((stamp.opacity !== undefined ? stamp.opacity : 1) * 100);
+    signOpacity.value = String(Math.max(20, Math.min(100, pct)));
+    if (signOpacityVal) signOpacityVal.textContent = `${pct}%`;
+  }
+  const listItems = document.querySelectorAll('.sign-stamp-item');
+  listItems.forEach(el => {
+    el.classList.toggle('selected', el.dataset.stampId === stampId);
+  });
   updateFloatingToolbarPosition();
 }
 
@@ -4747,6 +4767,66 @@ function deselectStamps() {
   }
   if (stampFloatingToolbar) {
     stampFloatingToolbar.style.display = 'none';
+  }
+  document.querySelectorAll('.sign-stamp-item.selected').forEach(el => el.classList.remove('selected'));
+}
+
+function updateSignPlaceButton() {
+  if (!btnPlaceStampOnPage) return;
+  const tab = signStudioState.activeTab;
+  let ready = false;
+  let hint = 'Đưa lên trang';
+
+  if (tab === 'upload') {
+    const list = getStoredStampLibrary();
+    ready = list.length > 0;
+    const picked = list.find(x => x.id === signStudioState.selectedLibId) || list[0];
+    hint = ready && picked
+      ? `Đưa “${picked.name || 'Con dấu'}” lên trang (Enter)`
+      : 'Chưa có ảnh trong thư viện — hãy tải ảnh trước';
+  } else if (tab === 'type') {
+    const name = ((signTypeName && signTypeName.value) || '').trim();
+    ready = !!name;
+    hint = ready
+      ? `Đưa chữ ký “${name}” lên trang (Enter)`
+      : 'Nhập họ và tên để tạo chữ ký';
+  } else if (tab === 'official') {
+    const title = ((stampOfficialTitle && stampOfficialTitle.value) || '').trim();
+    const name = ((stampOfficialName && stampOfficialName.value) || '').trim();
+    ready = !!(name || title);
+    hint = ready ? 'Đưa con dấu nghiệp vụ lên trang (Enter)' : 'Nhập nội dung con dấu';
+  }
+
+  btnPlaceStampOnPage.disabled = !ready;
+  btnPlaceStampOnPage.title = hint;
+  btnPlaceStampOnPage.setAttribute('aria-label', hint);
+  btnPlaceStampOnPage.classList.toggle('is-ready', ready);
+}
+
+function updateStageEmptyHint() {
+  const hint = document.getElementById('signStageEmptyHint');
+  if (!hint) return;
+  const has = signStudioState.currentStamps.length > 0;
+  hint.hidden = has;
+}
+
+function flashStampPlaced(stampId) {
+  if (!signStageOverlay) return;
+  const box = signStageOverlay.querySelector(`.stamp-box[data-stamp-id="${stampId}"]`);
+  if (!box) return;
+  box.classList.remove('just-placed');
+  // force reflow để animation chạy lại khi đặt liên tiếp
+  void box.offsetWidth;
+  box.classList.add('just-placed');
+  box.addEventListener('animationend', () => box.classList.remove('just-placed'), { once: true });
+  // Cuộn viewport về gần dấu vừa đặt nếu đang bị khuất
+  if (signStageViewport) {
+    const boxRect = box.getBoundingClientRect();
+    const vpRect = signStageViewport.getBoundingClientRect();
+    if (boxRect.bottom < vpRect.top + 40 || boxRect.top > vpRect.bottom - 40 ||
+        boxRect.right < vpRect.left + 40 || boxRect.left > vpRect.right - 40) {
+      box.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    }
   }
 }
 
@@ -4792,6 +4872,9 @@ function setupSignatureEvents() {
         if (other.pane) other.pane.style.display = other.id === t.id ? 'flex' : 'none';
       });
       signStudioState.activeTab = t.id;
+      // Luôn về đầu panel khi đổi công cụ để thấy preview/ngữ cảnh mới ngay
+      const scroller = document.querySelector('.sign-panel-scroll');
+      if (scroller) scroller.scrollTop = 0;
       if (t.id === 'upload') {
         renderStampLibrary();
       } else if (t.id === 'official') {
@@ -4799,7 +4882,39 @@ function setupSignatureEvents() {
       } else if (t.id === 'type') {
         updateTypeSignatureLivePreview();
       }
+      updateSignPlaceButton();
     });
+  });
+
+  // Rail keyboard: ↑/↓ chuyển tab khi đang focus rail (a11y)
+  const rail = document.querySelector('.sign-rail');
+  if (rail) {
+    rail.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const btns = tabs.map(t => t.btn).filter(Boolean);
+      const idx = btns.indexOf(document.activeElement);
+      if (idx < 0) return;
+      e.preventDefault();
+      const dir = (e.key === 'ArrowDown' || e.key === 'ArrowRight') ? 1 : -1;
+      const next = btns[(idx + dir + btns.length) % btns.length];
+      if (next) {
+        next.focus();
+        next.click();
+      }
+    });
+  }
+
+  // Enter = Đưa lên trang (khi không đang gõ trong input)
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!signModal || !signModal.classList.contains('active')) return;
+    const activeEl = document.activeElement;
+    if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) return;
+    if (activeEl === btnPlaceStampOnPage) return; // button native click
+    if (btnPlaceStampOnPage && !btnPlaceStampOnPage.disabled) {
+      e.preventDefault();
+      handlePlaceStampOnPage();
+    }
   });
 
   // 2. Tab 1: Upload Multiple Images to Library
@@ -4874,7 +4989,10 @@ function setupSignatureEvents() {
 
   // 3. Tab 2: Type Signature Logic (5 Cursive Fonts)
   if (signTypeName) {
-    signTypeName.addEventListener('input', updateTypeSignatureLivePreview);
+    signTypeName.addEventListener('input', () => {
+      updateTypeSignatureLivePreview();
+      updateSignPlaceButton();
+    });
   }
 
   const fontCards = paneType ? paneType.querySelectorAll('.sign-font-card') : [];
@@ -5113,13 +5231,18 @@ function setupSignatureEvents() {
       }
 
       updateOfficialStampPreview();
+      updateSignPlaceButton();
     });
   });
 
-  if (stampOfficialTitle) stampOfficialTitle.addEventListener('input', updateOfficialStampPreview);
-  if (stampOfficialName) stampOfficialName.addEventListener('input', updateOfficialStampPreview);
-  if (stampOfficialExtra) stampOfficialExtra.addEventListener('input', updateOfficialStampPreview);
-  if (stampBorderType) stampBorderType.addEventListener('change', updateOfficialStampPreview);
+  const syncOfficialAndPlace = () => {
+    updateOfficialStampPreview();
+    updateSignPlaceButton();
+  };
+  if (stampOfficialTitle) stampOfficialTitle.addEventListener('input', syncOfficialAndPlace);
+  if (stampOfficialName) stampOfficialName.addEventListener('input', syncOfficialAndPlace);
+  if (stampOfficialExtra) stampOfficialExtra.addEventListener('input', syncOfficialAndPlace);
+  if (stampBorderType) stampBorderType.addEventListener('change', syncOfficialAndPlace);
 
   if (chkOfficialDate) {
     chkOfficialDate.addEventListener('change', () => {
@@ -5136,6 +5259,16 @@ function setupSignatureEvents() {
     rngOfficialAngle.addEventListener('input', () => {
       updateOfficialStampPreview();
     });
+  }
+
+  // Apply-all: nhãn cảnh báo trực quan khi bật (rủi ro cao nếu copy nhầm)
+  if (chkApplyAllPages) {
+    const syncApplyAll = () => {
+      const wrap = chkApplyAllPages.closest('.sign-apply-all');
+      if (wrap) wrap.classList.toggle('is-on', chkApplyAllPages.checked);
+    };
+    chkApplyAllPages.addEventListener('change', syncApplyAll);
+    syncApplyAll();
   }
 
   const officialColorDots = paneOfficial ? paneOfficial.querySelectorAll('.sign-color-dot[data-official-color]') : [];
@@ -5201,11 +5334,21 @@ function setupSignatureEvents() {
     });
   }
 
-  // 6. Opacity Slider
+  // 6. Opacity Slider — áp ngay cho dấu đang chọn (không chỉ khi đặt mới)
   if (signOpacity) {
     signOpacity.addEventListener('input', () => {
       const val = parseInt(signOpacity.value, 10) || 100;
       if (signOpacityVal) signOpacityVal.textContent = `${val}%`;
+      if (!signStudioState.selectedStampId) return;
+      const stamp = signStudioState.currentStamps.find(s => s.id === signStudioState.selectedStampId);
+      if (!stamp) return;
+      stamp.opacity = val / 100;
+      if (signStageOverlay) {
+        const box = signStageOverlay.querySelector(`.stamp-box[data-stamp-id="${stamp.id}"]`);
+        if (box) box.style.opacity = String(stamp.opacity);
+      }
+      const item = document.querySelector(`.sign-stamp-item[data-stamp-id="${stamp.id}"] .sign-stamp-opacity`);
+      if (item) item.textContent = `${val}%`;
     });
   }
 
@@ -5470,6 +5613,7 @@ function setupSignatureEvents() {
 }
 
 function handlePlaceStampOnPage() {
+  if (btnPlaceStampOnPage && btnPlaceStampOnPage.disabled) return;
   let dataUrl = null;
 
   if (signStudioState.activeTab === 'upload') {
@@ -5587,6 +5731,7 @@ function addStampToCurrentPage(dataUrl) {
     renderSignStageStamps();
     renderSignStampsList();
     selectStamp(newStamp.id);
+    flashStampPlaced(newStamp.id);
     showToast('Đã đặt con dấu / chữ ký lên trang! Hãy kéo di chuyển, xoay hoặc co giãn.', 'success');
   };
   img.src = dataUrl;
@@ -5627,7 +5772,11 @@ function openSignStudio(pageIndex) {
   if (btnSignPrevPage) btnSignPrevPage.disabled = pageIndex === 0;
   if (btnSignNextPage) btnSignNextPage.disabled = pageIndex === state.pages.length - 1;
   if (signDocInfo) signDocInfo.textContent = `• Trang ${pageIndex + 1}/${state.pages.length}`;
-  if (chkApplyAllPages) chkApplyAllPages.checked = false;
+  if (chkApplyAllPages) {
+    chkApplyAllPages.checked = false;
+    const applyWrap = chkApplyAllPages.closest('.sign-apply-all');
+    if (applyWrap) applyWrap.classList.remove('is-on');
+  }
 
   // Mở modal ngay lập tức để người dùng thấy giao diện phản hồi tức thì
   if (signModal) {
@@ -5644,6 +5793,13 @@ function openSignStudio(pageIndex) {
     renderStampLibrary();
   } catch (err) {
     console.warn('Lỗi khi nạp thư viện con dấu:', err);
+  }
+
+  try {
+    updateSignPlaceButton();
+    updateStageEmptyHint();
+  } catch (err) {
+    console.warn('Lỗi khi cập nhật nút Place:', err);
   }
 
   try {
@@ -5803,6 +5959,7 @@ function renderSignStageStamps() {
     signStageOverlay.appendChild(box);
   });
 
+  updateStageEmptyHint();
   updateFloatingToolbarPosition();
 }
 
@@ -6060,10 +6217,13 @@ function renderSignStampsList() {
   signStudioState.currentStamps.forEach((stamp, idx) => {
     const item = document.createElement('div');
     item.className = 'sign-stamp-item';
+    if (stamp.id === signStudioState.selectedStampId) item.classList.add('selected');
+    item.dataset.stampId = stamp.id;
+    const opPct = Math.round((stamp.opacity !== undefined ? stamp.opacity : 1) * 100);
     item.innerHTML = `
       <div class="sign-stamp-item-left">
         <img src="${stamp.dataUrl}" alt="Dấu #${idx + 1}">
-        <span>Dấu #${idx + 1} (${Math.round((stamp.opacity || 1) * 100)}%)</span>
+        <span>Dấu #${idx + 1} · <span class="sign-stamp-opacity">${opPct}%</span></span>
       </div>
       <button type="button" class="btn btn-tool btn-danger btn-sm" title="Xóa">Xóa</button>
     `;
