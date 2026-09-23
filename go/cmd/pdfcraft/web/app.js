@@ -2332,6 +2332,24 @@ function renderGrid() {
       if (checkbox) checkbox.checked = pageItem.isSelected;
       card.classList.toggle('selected', pageItem.isSelected);
 
+      // Đồng bộ badge chữ ký/con dấu khi card được tái sử dụng (renderGrid không recreate)
+      const leftHeader = card.querySelector('.card-header-left');
+      if (leftHeader) {
+        let signedBadge = leftHeader.querySelector('.card-signed-badge');
+        const stampCount = (pageItem.stamps && pageItem.stamps.length) || 0;
+        if (stampCount > 0) {
+          if (!signedBadge) {
+            signedBadge = document.createElement('span');
+            signedBadge.className = 'card-signed-badge';
+            leftHeader.appendChild(signedBadge);
+          }
+          signedBadge.title = `Trang này có ${stampCount} chữ ký / con dấu`;
+          signedBadge.innerHTML = `🖋️ ${stampCount}`;
+        } else if (signedBadge) {
+          signedBadge.remove();
+        }
+      }
+
       // Re-render group pills
       const groupWrapper = card.querySelector('.card-groups-wrapper');
       if (groupWrapper) renderCardGroupPills(pageItem, groupWrapper);
@@ -3835,6 +3853,7 @@ const signStudioState = {
   selectedFont: 'dancing',
   strokeWidth: 2.5,
   uploadedDataUrl: null,
+  selectedLibId: null, // selected stamp library item for "Đưa lên trang"
   officialPreset: 'title_name',
   officialTitle: 'GIÁM ĐỐC',
   officialName: 'NGUYỄN VĂN AN',
@@ -4513,6 +4532,7 @@ function renderStampLibrary() {
   }
 
   if (list.length === 0) {
+    signStudioState.selectedLibId = null;
     stampLibraryGrid.innerHTML = `
       <div class="stamp-lib-empty">
         Chưa có ảnh con dấu nào trong thư viện. Bạn có thể tải lên nhiều ảnh (dấu công ty, dấu chức danh, chữ ký scan...) để dùng lại bất kỳ lúc nào!
@@ -4521,10 +4541,20 @@ function renderStampLibrary() {
     return;
   }
 
+  // Giữ selection hợp lệ: ưu tiên selection cũ, không thì chọn thẻ đầu.
+  if (!list.some(x => x.id === signStudioState.selectedLibId)) {
+    signStudioState.selectedLibId = list[0].id;
+  }
+
   stampLibraryGrid.innerHTML = '';
   list.forEach(item => {
     const card = document.createElement('div');
     card.className = 'stamp-lib-card';
+    if (item.id === signStudioState.selectedLibId) {
+      card.classList.add('selected');
+    }
+    card.dataset.libId = item.id;
+    card.title = 'Nhấp để chọn con dấu này, rồi bấm "Đưa lên trang"';
     card.innerHTML = `
       <div class="stamp-lib-thumb">
         <img src="${item.dataUrl}" alt="${escapeHtml(item.name || 'Con dấu')}">
@@ -4532,18 +4562,35 @@ function renderStampLibrary() {
       <div class="stamp-lib-title" title="${escapeHtml(item.name || 'Con dấu')}">${escapeHtml(item.name || 'Con dấu')}</div>
       <div class="stamp-lib-actions">
         <button type="button" class="btn btn-primary btn-sm btn-use-stamp" title="Đưa con dấu này lên trang PDF">Dùng dấu</button>
-        <button type="button" class="btn btn-tool btn-sm btn-filter-white" title="Lọc bỏ nền giấy trắng để con dấu trong suốt">⚡ Lọc nền trắng</button>
+        <button type="button" class="btn btn-tool btn-sm btn-filter-white" title="Lọc bỏ nền giấy trắng để con dấu trong suốt">⚡ Lọc</button>
         <button type="button" class="btn btn-tool btn-danger btn-sm btn-del-stamp" title="Xóa khỏi thư viện">Xóa</button>
       </div>
     `;
 
+    // Chọn thẻ (không đặt dấu ngay) — nút "Đưa lên trang" sẽ dùng thẻ này.
+    const selectThis = () => {
+      signStudioState.selectedLibId = item.id;
+      stampLibraryGrid.querySelectorAll('.stamp-lib-card').forEach(c => {
+        c.classList.toggle('selected', c.dataset.libId === signStudioState.selectedLibId);
+      });
+    };
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      selectThis();
+    });
+    card.querySelector('.stamp-lib-thumb').addEventListener('click', selectThis);
+    card.querySelector('.stamp-lib-title').addEventListener('click', selectThis);
+
     // Action: Dùng dấu
-    card.querySelector('.btn-use-stamp').addEventListener('click', () => {
+    card.querySelector('.btn-use-stamp').addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectThis();
       addStampToCurrentPage(item.dataUrl);
     });
 
     // Action: Lọc nền trắng
     card.querySelector('.btn-filter-white').addEventListener('click', async (e) => {
+      e.stopPropagation();
       const btn = e.currentTarget;
       const originalText = btn.textContent;
       btn.textContent = 'Đang lọc...';
@@ -4568,9 +4615,13 @@ function renderStampLibrary() {
     });
 
     // Action: Xóa
-    card.querySelector('.btn-del-stamp').addEventListener('click', () => {
+    card.querySelector('.btn-del-stamp').addEventListener('click', (e) => {
+      e.stopPropagation();
       const currentList = getStoredStampLibrary().filter(x => x.id !== item.id);
       saveStoredStampLibrary(currentList);
+      if (signStudioState.selectedLibId === item.id) {
+        signStudioState.selectedLibId = null;
+      }
       renderStampLibrary();
       showToast('Đã xóa con dấu khỏi thư viện!', 'info');
     });
@@ -4699,10 +4750,30 @@ function deselectStamps() {
   }
 }
 
+function updateTypeSignatureLivePreview() {
+  const text = ((signTypeName && signTypeName.value) || '').trim() || 'Nguyễn Văn An';
+  const samples = paneType ? paneType.querySelectorAll('.sign-font-sample') : [];
+  samples.forEach(s => {
+    s.textContent = text;
+    s.style.color = signStudioState.typeInkColor || '#0f172a';
+  });
+  const live = document.getElementById('signTypeLiveSample');
+  if (live && signStudioState.selectedFont) {
+    const fontMap = {
+      dancing: "'Dancing Script', cursive",
+      greatvibes: "'Great Vibes', cursive",
+      alexbrush: "'Alex Brush', cursive",
+      caveat: "'Caveat', cursive",
+      pacifico: "'Pacifico', cursive",
+    };
+    live.style.fontFamily = fontMap[signStudioState.selectedFont] || fontMap.dancing;
+  }
+}
+
 function setupSignatureEvents() {
   if (!signModal) return;
 
-  // 1. Tab Switching (3 tabs: Upload/Library, Type, Official Stamp)
+  // 1. Tab Switching (vertical rail: Upload/Library, Type, Official Stamp)
   const tabs = [
     { btn: tabUpload, pane: paneUpload, id: 'upload' },
     { btn: tabType, pane: paneType, id: 'type' },
@@ -4713,14 +4784,20 @@ function setupSignatureEvents() {
     if (!t.btn) return;
     t.btn.addEventListener('click', () => {
       tabs.forEach(other => {
-        if (other.btn) other.btn.classList.toggle('active', other.id === t.id);
-        if (other.pane) other.pane.style.display = other.id === t.id ? 'block' : 'none';
+        if (other.btn) {
+          const on = other.id === t.id;
+          other.btn.classList.toggle('active', on);
+          other.btn.setAttribute('aria-selected', on ? 'true' : 'false');
+        }
+        if (other.pane) other.pane.style.display = other.id === t.id ? 'flex' : 'none';
       });
       signStudioState.activeTab = t.id;
       if (t.id === 'upload') {
         renderStampLibrary();
       } else if (t.id === 'official') {
         updateOfficialStampPreview();
+      } else if (t.id === 'type') {
+        updateTypeSignatureLivePreview();
       }
     });
   });
@@ -4797,11 +4874,7 @@ function setupSignatureEvents() {
 
   // 3. Tab 2: Type Signature Logic (5 Cursive Fonts)
   if (signTypeName) {
-    signTypeName.addEventListener('input', () => {
-      const text = signTypeName.value.trim() || 'Nguyễn Văn An';
-      const samples = paneType ? paneType.querySelectorAll('.sign-font-sample') : [];
-      samples.forEach(s => s.textContent = text);
-    });
+    signTypeName.addEventListener('input', updateTypeSignatureLivePreview);
   }
 
   const fontCards = paneType ? paneType.querySelectorAll('.sign-font-card') : [];
@@ -4810,6 +4883,7 @@ function setupSignatureEvents() {
       fontCards.forEach(c => c.classList.remove('active'));
       card.classList.add('active');
       signStudioState.selectedFont = card.dataset.font || 'dancing';
+      updateTypeSignatureLivePreview();
     });
   });
 
@@ -4818,10 +4892,8 @@ function setupSignatureEvents() {
     dot.addEventListener('click', () => {
       typeColorDots.forEach(d => d.classList.remove('active'));
       dot.classList.add('active');
-      const color = dot.dataset.typeColor || '#0f172a';
-      signStudioState.typeInkColor = color;
-      const samples = paneType ? paneType.querySelectorAll('.sign-font-sample') : [];
-      samples.forEach(s => s.style.color = color);
+      signStudioState.typeInkColor = dot.dataset.typeColor || '#0f172a';
+      updateTypeSignatureLivePreview();
     });
   });
 
@@ -5406,7 +5478,13 @@ function handlePlaceStampOnPage() {
       showToast('Vui lòng tải lên ít nhất 1 ảnh con dấu trong thư viện hoặc nhấn "Dùng dấu"!', 'danger');
       return;
     }
-    dataUrl = list[0].dataUrl;
+    // Dùng đúng thẻ đang chọn (không còn hardcode list[0]).
+    const picked = list.find(x => x.id === signStudioState.selectedLibId) || list[0];
+    if (signStudioState.selectedLibId !== picked.id) {
+      signStudioState.selectedLibId = picked.id;
+      renderStampLibrary();
+    }
+    dataUrl = picked.dataUrl;
   } else if (signStudioState.activeTab === 'type') {
     const name = (signTypeName ? signTypeName.value : '').trim();
     if (!name) {
@@ -5982,13 +6060,12 @@ function renderSignStampsList() {
   signStudioState.currentStamps.forEach((stamp, idx) => {
     const item = document.createElement('div');
     item.className = 'sign-stamp-item';
-    item.style.cursor = 'pointer';
     item.innerHTML = `
-      <div style="display:flex;align-items:center;gap:8px;">
+      <div class="sign-stamp-item-left">
         <img src="${stamp.dataUrl}" alt="Dấu #${idx + 1}">
         <span>Dấu #${idx + 1} (${Math.round((stamp.opacity || 1) * 100)}%)</span>
       </div>
-      <button type="button" class="btn btn-tool btn-danger btn-sm" style="padding:2px 6px;" title="Xóa">Xóa</button>
+      <button type="button" class="btn btn-tool btn-danger btn-sm" title="Xóa">Xóa</button>
     `;
     item.addEventListener('click', (e) => {
       if (e.target.tagName !== 'BUTTON') {
