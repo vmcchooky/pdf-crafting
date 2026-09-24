@@ -738,6 +738,21 @@ body.is-marquee-selecting * {
   cursor: grabbing;
 }
 
+/* Live-gap kéo thả: khối đang kéo = “ghost” trong khe hở, các thẻ khác trượt né */
+.pages-grid.dragging-active .page-card {
+  transition: transform 0.14s cubic-bezier(0.2, 0, 0.1, 1),
+    margin 0.14s cubic-bezier(0.2, 0, 0.1, 1),
+    border-color 0.14s ease,
+    opacity 0.14s ease;
+}
+
+.pages-grid.dragging-active .page-card.dragging {
+  opacity: 0.35;
+  outline: 2px dashed rgba(99, 102, 241, 0.65);
+  outline-offset: 4px;
+  z-index: 5;
+}
+
 /* Nhấn nhá khi trang vừa được di chuyển bằng nút / phím tắt */
 @keyframes cardMovedFlash {
   0% { box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.9), 0 0 18px rgba(99, 102, 241, 0.55); }
