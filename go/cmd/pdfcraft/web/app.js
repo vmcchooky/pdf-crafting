@@ -74,6 +74,10 @@ const historyStack = [];
 const redoStack = [];
 const MAX_HISTORY = 20;
 let lastSelectedPageIndex = null;
+// Kéo thả live-gap: DOM đã được sắp lại trong lúc dragover chưa commit vào state.pages
+let dragLiveActive = false;
+let dragDidDrop = false;
+let dragPageIds = [];
 
 // Thumbnail image render cache (ImageBitmap / Canvas) sử dụng Bounded LRU Cache để giới hạn VRAM và tự thu hồi bitmap.close()
 // key: `${pageId}_${rotation}` -> { bitmap, canvas, width, height }
@@ -2759,10 +2763,124 @@ function setupPagesGridDelegation() {
   // thay vì 6 listener/card (500 trang = 3000 listener). Hành vi giữ nguyên bản per-card.
   const resolveDragCard = (e) => (e.target && e.target.closest ? e.target.closest('.page-card') : null);
 
+  function reindexGridCards(updateTitles) {
+    const allCards = pagesGrid.querySelectorAll('.page-card');
+    for (let i = 0; i < allCards.length; i++) {
+      const c = allCards[i];
+      c.dataset.index = i;
+      const badge = c.querySelector('.card-num-badge');
+      if (badge) badge.textContent = `#${i + 1}`;
+      if (updateTitles) {
+        const titleInput = c.querySelector('.card-title-input');
+        const pageObj = state.pages[i];
+        if (titleInput && pageObj && (!pageObj.title || pageObj.title.startsWith('#'))) {
+          pageObj.title = `#${i + 1}`;
+          titleInput.value = pageObj.title;
+        }
+      }
+    }
+  }
+
+  function getDraggingCards() {
+    if (dragPageIds.length) {
+      return dragPageIds
+        .map(id => pagesGrid.querySelector(`.page-card[data-page-id="${id}"]`))
+        .filter(Boolean);
+    }
+    return Array.from(pagesGrid.querySelectorAll('.page-card.dragging'));
+  }
+
+  function isDragBlockPlaced(targetCard, placeBefore) {
+    const cards = getDraggingCards();
+    if (!cards.length) return false;
+    if (placeBefore) {
+      let node = targetCard.previousElementSibling;
+      for (let i = cards.length - 1; i >= 0; i--) {
+        if (node !== cards[i]) return false;
+        node = node.previousElementSibling;
+      }
+      return true;
+    }
+    let node = targetCard.nextElementSibling;
+    for (let i = 0; i < cards.length; i++) {
+      if (node !== cards[i]) return false;
+      node = node.nextElementSibling;
+    }
+    return true;
+  }
+
+  // Live gap: dời ngay khối đang kéo tới vị trí hover — trang khác tự né, hiện khoảng trống thật
+  function applyLiveDragGap(targetCard, placeBefore) {
+    if (!targetCard || targetCard.classList.contains('dragging')) return false;
+    if (isDragBlockPlaced(targetCard, placeBefore)) return false;
+    const cards = getDraggingCards();
+    if (!cards.length) return false;
+    const frag = document.createDocumentFragment();
+    cards.forEach(c => frag.appendChild(c));
+    if (placeBefore) {
+      targetCard.before(frag);
+    } else {
+      targetCard.after(frag);
+    }
+    reindexGridCards(false);
+    dragLiveActive = true;
+    return true;
+  }
+
+  function flashMovedCards(ids) {
+    ids.forEach(id => {
+      const card = pagesGrid.querySelector(`.page-card[data-page-id="${id}"]`);
+      if (card) {
+        card.classList.remove('just-moved');
+        void card.offsetWidth;
+        card.classList.add('just-moved');
+        setTimeout(() => card.classList.remove('just-moved'), 750);
+      }
+    });
+  }
+
+  function commitOrderFromDom() {
+    const byId = new Map(state.pages.map(p => [p.id, p]));
+    const newOrder = [];
+    pagesGrid.querySelectorAll('.page-card').forEach(c => {
+      const p = byId.get(c.dataset.pageId);
+      if (p) newOrder.push(p);
+    });
+    if (newOrder.length !== state.pages.length) return false;
+    const changed = newOrder.some((p, i) => p.id !== state.pages[i].id);
+    if (!changed) return false;
+    saveHistoryState();
+    state.pages = newOrder;
+    reindexGridCards(true);
+    updateSelectionUI();
+    return true;
+  }
+
+  function restoreGridDomFromState() {
+    const byId = new Map();
+    pagesGrid.querySelectorAll('.page-card').forEach(c => byId.set(c.dataset.pageId, c));
+    const frag = document.createDocumentFragment();
+    let missing = false;
+    state.pages.forEach(p => {
+      const c = byId.get(p.id);
+      if (c) frag.appendChild(c);
+      else missing = true;
+    });
+    if (missing) {
+      renderGrid();
+      return;
+    }
+    pagesGrid.appendChild(frag);
+    reindexGridCards(false);
+  }
+
   pagesGrid.addEventListener('dragstart', (e) => {
     const card = resolveDragCard(e);
     if (!card) return;
     isUserInteracting = true;
+    dragLiveActive = false;
+    dragDidDrop = false;
+    dragPageIds = [];
     const idx = parseInt(card.dataset.index, 10);
     const draggedPage = state.pages[idx];
 
@@ -2773,6 +2891,7 @@ function setupPagesGridDelegation() {
       const selectedPages = state.pages.filter(p => p.isSelected);
       if (selectedPages.length > 1) {
         state.isMultiDragging = true;
+        dragPageIds = selectedPages.map(p => p.id);
         // Mark all selected cards with .dragging
         pagesGrid.querySelectorAll('.page-card.selected').forEach(c => c.classList.add('dragging'));
 
@@ -2787,12 +2906,15 @@ function setupPagesGridDelegation() {
         }
       } else {
         state.isMultiDragging = false;
+        dragPageIds = [draggedPage.id];
         card.classList.add('dragging');
       }
     } else {
       state.isMultiDragging = false;
+      if (draggedPage) dragPageIds = [draggedPage.id];
       card.classList.add('dragging');
     }
+    pagesGrid.classList.add('dragging-active');
 
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', idx);
@@ -2802,6 +2924,13 @@ function setupPagesGridDelegation() {
     pagesGrid.querySelectorAll('.page-card.dragging, .page-card.drag-over-left, .page-card.drag-over-right').forEach(c => {
       c.classList.remove('dragging', 'drag-over-left', 'drag-over-right');
     });
+    pagesGrid.classList.remove('dragging-active');
+    if (dragLiveActive && !dragDidDrop) {
+      restoreGridDomFromState();
+    }
+    dragLiveActive = false;
+    dragDidDrop = false;
+    dragPageIds = [];
     state.draggedIndex = null;
     state.isMultiDragging = false;
     isUserInteracting = false;
@@ -2824,19 +2953,24 @@ function setupPagesGridDelegation() {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
 
-    const curIndex = parseInt(card.dataset.index, 10);
-    if (state.draggedIndex === null || state.draggedIndex === curIndex) {
+    if (card.classList.contains('dragging')) {
+      card.classList.remove('drag-over-left', 'drag-over-right');
       return;
     }
+    if (state.draggedIndex === null) return;
 
-    const targetPage = state.pages[curIndex];
-    if (state.isMultiDragging && targetPage && targetPage.isSelected) {
+    // Lookup theo pageId — sau live-reindex, dataset.index đã khớp DOM nhưng state.pages chưa commit
+    const targetPage = state.pages.find(p => p.id === card.dataset.pageId);
+    if (state.isMultiDragging && card.classList.contains('selected')) {
       card.classList.remove('drag-over-left', 'drag-over-right');
       return;
     }
 
     // So sánh toạ độ chuột với điểm giữa thẻ đã lưu đệm từ dragenter, KHÔNG gọi getBoundingClientRect() lặp lại
     const isLeftHalf = card._dragMidX > 0 ? (e.clientX < card._dragMidX) : (e.offsetX < card.offsetWidth / 2);
+
+    // Live gap: trang khác né ra, khoảng trống xuất hiện tại điểm thả (trước/sau thẻ hover)
+    applyLiveDragGap(card, isLeftHalf);
 
     if (isLeftHalf) {
       if (!card.classList.contains('drag-over-left')) {
@@ -2863,70 +2997,63 @@ function setupPagesGridDelegation() {
     e.preventDefault();
     card.classList.remove('drag-over-left', 'drag-over-right');
 
-    const toIndex = parseInt(card.dataset.index, 10);
-    const targetPage = state.pages[toIndex];
-    if (!targetPage) return;
+    if (card.classList.contains('dragging')) return;
 
-    saveHistoryState();
+    const targetPage = state.pages.find(p => p.id === card.dataset.pageId);
+    if (!targetPage && !dragLiveActive) return;
 
     const isLeftHalf = card._dragMidX > 0 ? (e.clientX < card._dragMidX) : (e.offsetX < card.offsetWidth / 2);
+    const movedIds = dragPageIds.slice();
 
+    // Ưu tiên commit thứ tự DOM nếu dragover đã live-gap (kéo thả kiểu “né ra”)
+    if (dragLiveActive) {
+      if (state.isMultiDragging && card.classList.contains('selected')) return; // drop lên chính khối đang kéo — hủy, dragend sẽ khôi phục DOM
+      dragDidDrop = true;
+      const ok = commitOrderFromDom();
+      if (ok) {
+        flashMovedCards(movedIds);
+        showToast(`Đã di chuyển ${movedIds.length || 1} trang tới vị trí mới!`, 'success');
+      }
+      return;
+    }
+
+    // Fallback: drop không qua dragover live (giữ hành vi cũ)
     if (state.isMultiDragging) {
-      // Multi-page drag & drop: In-Place DOM Reorder bằng DocumentFragment (<16ms, không renderGrid)
-      if (targetPage.isSelected) return; // Dropping on self
+      if (!targetPage || card.classList.contains('selected')) return;
 
       const selectedPages = state.pages.filter(p => p.isSelected);
       const otherPages = state.pages.filter(p => !p.isSelected);
 
       let targetPos = otherPages.indexOf(targetPage);
       if (targetPos === -1) return;
+      const toIndex = parseInt(card.dataset.index, 10);
+      if (!isLeftHalf) targetPos += 1;
 
-      if (!isLeftHalf) {
-        targetPos += 1;
-      }
-
-      // Gom các thẻ DOM đang chọn và di chuyển trực tiếp
+      saveHistoryState();
       const selectedCards = selectedPages.map(p => pagesGrid.querySelector(`.page-card[data-page-id="${p.id}"]`)).filter(Boolean);
       const fragment = document.createDocumentFragment();
       selectedCards.forEach(c => fragment.appendChild(c));
-
       if (isLeftHalf) {
         card.before(fragment);
       } else {
         card.after(fragment);
       }
-
       otherPages.splice(targetPos, 0, ...selectedPages);
       state.pages = otherPages;
-
-      // Cập nhật lại chỉ số dataset.index và số thứ tự trang cho toàn bộ thẻ DOM
-      const allCards = pagesGrid.querySelectorAll('.page-card');
-      for (let i = 0; i < allCards.length; i++) {
-        const c = allCards[i];
-        c.dataset.index = i;
-        const badge = c.querySelector('.card-num-badge');
-        if (badge) badge.textContent = `#${i + 1}`;
-        const titleInput = c.querySelector('.card-title-input');
-        const pageObj = state.pages[i];
-        if (titleInput && pageObj && (!pageObj.title || pageObj.title.startsWith('#'))) {
-          pageObj.title = `#${i + 1}`;
-          titleInput.value = pageObj.title;
-        }
-      }
-
+      reindexGridCards(true);
+      updateSelectionUI();
+      dragDidDrop = true;
       showToast(`Đã di chuyển ${selectedPages.length} trang tới vị trí mới!`, 'success');
     } else {
-      // Single-page drag & drop: Cập nhật DOM trực tiếp (In-Place DOM Reorder)
       const fromIndex = state.draggedIndex;
+      const toIndex = parseInt(card.dataset.index, 10);
       if (fromIndex === null || fromIndex === toIndex) return;
 
       let targetIndex = isLeftHalf ? toIndex : toIndex + 1;
-      if (fromIndex < targetIndex) {
-        targetIndex--;
-      }
-
+      if (fromIndex < targetIndex) targetIndex--;
       if (fromIndex === targetIndex) return;
 
+      saveHistoryState();
       const [movedPage] = state.pages.splice(fromIndex, 1);
       state.pages.splice(targetIndex, 0, movedPage);
 
@@ -2937,29 +3064,11 @@ function setupPagesGridDelegation() {
         } else {
           card.before(draggedCard);
         }
-
-        // Cập nhật lại chỉ số dataset.index và số thứ tự trang cho dải thẻ bị ảnh hưởng
-        const minIdx = Math.min(fromIndex, targetIndex);
-        const maxIdx = Math.max(fromIndex, targetIndex);
-        const allCards = pagesGrid.querySelectorAll('.page-card');
-        for (let i = minIdx; i <= maxIdx; i++) {
-          const c = allCards[i];
-          if (c) {
-            c.dataset.index = i;
-            const badge = c.querySelector('.card-num-badge');
-            if (badge) badge.textContent = `#${i + 1}`;
-            const titleInput = c.querySelector('.card-title-input');
-            const pageObj = state.pages[i];
-            if (titleInput && pageObj && (!pageObj.title || pageObj.title.startsWith('#'))) {
-              pageObj.title = `#${i + 1}`;
-              titleInput.value = pageObj.title;
-            }
-          }
-        }
+        reindexGridCards(true);
       } else {
         renderGrid();
       }
-
+      dragDidDrop = true;
       showToast(`Đã di chuyển trang tới vị trí #${targetIndex + 1}`, 'success');
     }
   });
