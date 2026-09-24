@@ -66,6 +66,8 @@ const state = {
 };
 
 let nextId = 1;
+// Thứ tự gốc khi nạp trang — dùng cho nút "Thứ tự gốc" (khôi phục)
+let nextOriginalIndex = 1;
 
 // Undo / Redo History Stacks (tối đa 20 trạng thái gần nhất mỗi chiều)
 const historyStack = [];
@@ -181,6 +183,12 @@ const btnDeleteSelected = document.getElementById('btnDeleteSelected');
 const btnExtractSelected = document.getElementById('btnExtractSelected');
 const btnRotateSelected = document.getElementById('btnRotateSelected');
 const btnReverseOrder = document.getElementById('btnReverseOrder');
+const btnMoveStart = document.getElementById('btnMoveStart');
+const btnMoveLeft = document.getElementById('btnMoveLeft');
+const btnMoveRight = document.getElementById('btnMoveRight');
+const btnMoveEnd = document.getElementById('btnMoveEnd');
+const btnMoveToPos = document.getElementById('btnMoveToPos');
+const btnRestoreOrder = document.getElementById('btnRestoreOrder');
 const btnUndo = document.getElementById('btnUndo');
 const btnRedo = document.getElementById('btnRedo');
 const btnSplitAll = document.getElementById('btnSplitAll');
@@ -335,6 +343,15 @@ const btnPlaceStampOnPage = document.getElementById('btnPlaceStampOnPage');
 const signStampCountBadge = document.getElementById('signStampCountBadge');
 const signStampsList = document.getElementById('signStampsList');
 const btnClearPageStamps = document.getElementById('btnClearPageStamps');
+
+function syncRangeFill(el) {
+  if (!el || el.type !== 'range') return;
+  const min = parseFloat(el.min) || 0;
+  const max = parseFloat(el.max) || 100;
+  const val = parseFloat(el.value) || 0;
+  const pct = max === min ? 100 : ((val - min) / (max - min)) * 100;
+  el.style.setProperty('--range-pct', `${pct}%`);
+}
 
 // Stage Navigation, Viewport & Zoom
 const btnSignPrevPage = document.getElementById('btnSignPrevPage');
@@ -1178,6 +1195,7 @@ async function saveProject() {
         isSelected: !!p.isSelected,
         groupIds: [...(p.groupIds || [])],
         stamps: (p.stamps || []).map(stripRuntimeFields),
+        originalIndex: typeof p.originalIndex === 'number' ? p.originalIndex : 0,
       })),
     };
     const json = JSON.stringify(project);
@@ -1203,6 +1221,11 @@ function bumpNextIdFromLoaded() {
   state.groups.forEach(g => scan(g.id));
   state.pages.forEach(p => scan(p.id));
   nextId = maxNum;
+  let maxOrig = nextOriginalIndex;
+  state.pages.forEach(p => {
+    if (typeof p.originalIndex === 'number' && p.originalIndex >= maxOrig) maxOrig = p.originalIndex + 1;
+  });
+  nextOriginalIndex = maxOrig;
 }
 
 async function loadProjectFile(file) {
@@ -1291,6 +1314,7 @@ async function loadProjectFile(file) {
         isSelected: !!sp.isSelected,
         groupIds: (sp.groupIds || []).filter(gid => validGroupIds.has(gid)),
         stamps: sp.stamps || [],
+        originalIndex: typeof sp.originalIndex === 'number' ? sp.originalIndex : nextOriginalIndex++,
       });
     });
     bumpNextIdFromLoaded();
@@ -1436,6 +1460,109 @@ function restoreSnapshot(snapshot) {
   renderGroupBar();
 }
 
+// ==========================================================================
+// Arrange: di chuyển trang đã chọn (không cần kéo thả)
+// ==========================================================================
+
+function moveSelectedPages(mode) {
+  const selected = state.pages.filter(p => p.isSelected);
+  if (selected.length === 0 || selected.length === state.pages.length) return;
+  const selectedSet = new Set(selected.map(p => p.id));
+  const arr = [...state.pages];
+  let moved = false;
+
+  if (mode === 'left') {
+    // Quét trái→phải: mỗi trang đã chọn lùi 1 bước; trang không chọn tự né sang phải tạo khoảng trống
+    for (let i = 0; i < arr.length; i++) {
+      if (!selectedSet.has(arr[i].id)) continue;
+      if (i === 0) continue;
+      if (selectedSet.has(arr[i - 1].id)) continue;
+      const tmp = arr[i - 1];
+      arr[i - 1] = arr[i];
+      arr[i] = tmp;
+      moved = true;
+    }
+  } else if (mode === 'right') {
+    // Quét phải→trái: mỗi trang đã chọn tiến 1 bước; trang không chọn tự né sang trái tạo khoảng trống
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (!selectedSet.has(arr[i].id)) continue;
+      if (i === arr.length - 1) continue;
+      if (selectedSet.has(arr[i + 1].id)) continue;
+      const tmp = arr[i + 1];
+      arr[i + 1] = arr[i];
+      arr[i] = tmp;
+      moved = true;
+    }
+  } else if (mode === 'start') {
+    const firstIdx = arr.findIndex(p => selectedSet.has(p.id));
+    if (firstIdx === 0) return;
+    const rest = arr.filter(p => !selectedSet.has(p.id));
+    arr.splice(0, arr.length, ...selected, ...rest);
+    moved = true;
+  } else if (mode === 'end') {
+    let lastIdx = -1;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (selectedSet.has(arr[i].id)) { lastIdx = i; break; }
+    }
+    if (lastIdx === arr.length - 1) return;
+    const rest = arr.filter(p => !selectedSet.has(p.id));
+    arr.splice(0, arr.length, ...rest, ...selected);
+    moved = true;
+  } else if (typeof mode === 'number' && Number.isFinite(mode)) {
+    const rest = arr.filter(p => !selectedSet.has(p.id));
+    const insertAt = Math.max(0, Math.min(mode, rest.length));
+    rest.splice(insertAt, 0, ...selected);
+    const same = arr.every((p, i) => p.id === rest[i].id);
+    if (same) return;
+    arr.splice(0, arr.length, ...rest);
+    moved = true;
+  } else {
+    return;
+  }
+
+  if (!moved) {
+    showToast(mode === 'left' ? 'Đã ở vị trí đầu tiên — không thể di chuyển trái hơn!' : 'Đã ở vị trí cuối cùng — không thể di chuyển phải hơn!', 'info');
+    return;
+  }
+
+  saveHistoryState();
+  state.pages = arr;
+  renderGrid();
+  updateSelectionUI();
+
+  // Nhấn nhá các thẻ vừa di chuyển
+  selected.forEach(p => {
+    const card = pagesGrid.querySelector(`.page-card[data-page-id="${p.id}"]`);
+    if (card) {
+      card.classList.remove('just-moved');
+      void card.offsetWidth;
+      card.classList.add('just-moved');
+      setTimeout(() => card.classList.remove('just-moved'), 750);
+    }
+  });
+
+  const labels = { start: 'đầu danh sách', end: 'cuối danh sách', left: 'sang trái', right: 'sang phải' };
+  const label = labels[mode] || (typeof mode === 'number' ? `vị trí #${mode + 1}` : '');
+  showToast(`Đã di chuyển ${selected.length} trang${label ? ' ' + label : ''}`, 'success');
+}
+
+function restoreOriginalOrder() {
+  if (state.pages.length < 2) return;
+  const sorted = [...state.pages].sort((a, b) => {
+    const ao = typeof a.originalIndex === 'number' ? a.originalIndex : Number.MAX_SAFE_INTEGER;
+    const bo = typeof b.originalIndex === 'number' ? b.originalIndex : Number.MAX_SAFE_INTEGER;
+    return ao - bo;
+  });
+  if (sorted.every((p, i) => p.id === state.pages[i].id)) {
+    showToast('Thứ tự đã là thứ tự gốc!', 'info');
+    return;
+  }
+  saveHistoryState();
+  state.pages = sorted;
+  renderGrid();
+  showToast('Đã khôi phục thứ tự gốc khi nạp file', 'success');
+}
+
 function undo() {
   if (historyStack.length === 0) return;
   redoStack.push(snapshotPages());
@@ -1524,6 +1651,26 @@ function setupToolbarEvents() {
     pagesGrid.appendChild(fragment);
     showToast('Đã đảo ngược thứ tự toàn bộ các trang', 'success');
   });
+
+  if (btnMoveStart) btnMoveStart.addEventListener('click', () => moveSelectedPages('start'));
+  if (btnMoveLeft) btnMoveLeft.addEventListener('click', () => moveSelectedPages('left'));
+  if (btnMoveRight) btnMoveRight.addEventListener('click', () => moveSelectedPages('right'));
+  if (btnMoveEnd) btnMoveEnd.addEventListener('click', () => moveSelectedPages('end'));
+  if (btnMoveToPos) {
+    btnMoveToPos.addEventListener('click', () => {
+      const selectedCount = state.pages.filter(p => p.isSelected).length;
+      if (selectedCount === 0) return;
+      const raw = prompt(`Chuyển ${selectedCount} trang đã chọn tới vị trí số (1 – ${state.pages.length - selectedCount + 1}):`, '1');
+      if (raw === null) return;
+      const n = parseInt(raw, 10);
+      if (!Number.isFinite(n) || n < 1) {
+        showToast('Vị trí không hợp lệ!', 'danger');
+        return;
+      }
+      moveSelectedPages(n - 1);
+    });
+  }
+  if (btnRestoreOrder) btnRestoreOrder.addEventListener('click', restoreOriginalOrder);
 
   if (btnUndo) {
     btnUndo.addEventListener('click', undo);
@@ -1673,6 +1820,33 @@ function setupToolbarEvents() {
         rotateSelectedPages();
       }
       return;
+    }
+
+    // Alt+← / Alt+→ : Di chuyển trang đã chọn
+    // Alt+Home / Alt+End : Về đầu / cuối
+    if (e.altKey && !e.ctrlKey && !e.metaKey) {
+      const selectedCount = state.pages.filter(p => p.isSelected).length;
+      if (selectedCount === 0) return;
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        moveSelectedPages('left');
+        return;
+      }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        moveSelectedPages('right');
+        return;
+      }
+      if (e.key === 'Home') {
+        e.preventDefault();
+        moveSelectedPages('start');
+        return;
+      }
+      if (e.key === 'End') {
+        e.preventDefault();
+        moveSelectedPages('end');
+        return;
+      }
     }
 
     // /: Focus document search
@@ -2216,6 +2390,7 @@ async function loadPdfFiles(files, isAppend = false) {
           isSelected: false,
           groupIds: [],
           stamps: [],
+          originalIndex: nextOriginalIndex++,
         });
       }
 
@@ -2266,6 +2441,11 @@ function updateSelectionUI() {
   btnExtractSelected.disabled = selectedCount === 0;
   if (btnRotateSelected) btnRotateSelected.disabled = selectedCount === 0;
   btnAssignGroup.disabled = selectedCount === 0;
+  if (btnMoveStart) btnMoveStart.disabled = selectedCount === 0;
+  if (btnMoveLeft) btnMoveLeft.disabled = selectedCount === 0;
+  if (btnMoveRight) btnMoveRight.disabled = selectedCount === 0;
+  if (btnMoveEnd) btnMoveEnd.disabled = selectedCount === 0;
+  if (btnMoveToPos) btnMoveToPos.disabled = selectedCount === 0;
 
   if (selectedCount === 0) {
     chkSelectAll.checked = false;
@@ -4751,6 +4931,7 @@ function selectStamp(stampId) {
   if (stamp && signOpacity) {
     const pct = Math.round((stamp.opacity !== undefined ? stamp.opacity : 1) * 100);
     signOpacity.value = String(Math.max(20, Math.min(100, pct)));
+    syncRangeFill(signOpacity);
     if (signOpacityVal) signOpacityVal.textContent = `${pct}%`;
   }
   const listItems = document.querySelectorAll('.sign-stamp-item');
@@ -5256,7 +5437,9 @@ function setupSignatureEvents() {
 
   if (chkOfficialGrunge) chkOfficialGrunge.addEventListener('change', updateOfficialStampPreview);
   if (rngOfficialAngle) {
+    syncRangeFill(rngOfficialAngle);
     rngOfficialAngle.addEventListener('input', () => {
+      syncRangeFill(rngOfficialAngle);
       updateOfficialStampPreview();
     });
   }
@@ -5336,8 +5519,10 @@ function setupSignatureEvents() {
 
   // 6. Opacity Slider — áp ngay cho dấu đang chọn (không chỉ khi đặt mới)
   if (signOpacity) {
+    syncRangeFill(signOpacity);
     signOpacity.addEventListener('input', () => {
       const val = parseInt(signOpacity.value, 10) || 100;
+      syncRangeFill(signOpacity);
       if (signOpacityVal) signOpacityVal.textContent = `${val}%`;
       if (!signStudioState.selectedStampId) return;
       const stamp = signStudioState.currentStamps.find(s => s.id === signStudioState.selectedStampId);
@@ -5763,7 +5948,10 @@ function openSignStudio(pageIndex) {
     state.pages.forEach((page, i) => {
       const opt = document.createElement('option');
       opt.value = String(i);
-      opt.textContent = `Trang #${i + 1} (${page.title || `Trang ${i + 1}`})`;
+      const label = page.title && page.title.trim() && page.title !== `Trang ${i + 1}`
+        ? `${i + 1}. ${page.title}`
+        : `Trang ${i + 1}`;
+      opt.textContent = label;
       signPageSelect.appendChild(opt);
     });
     signPageSelect.value = String(pageIndex);
