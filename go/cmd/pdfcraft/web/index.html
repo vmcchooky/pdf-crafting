@@ -6,7 +6,7 @@
   <title>PDF Craft - Công cụ chỉnh sửa & sắp xếp trang PDF chuyên nghiệp</title>
   <meta name="description" content="Trình biên tập PDF trực quan, mượt mà: kéo thả đổi thứ tự trang, chèn trang từ tệp khác, xóa trang và trích xuất PDF tốc độ cao.">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="app.css?v=2.3">
+  <link rel="stylesheet" href="app.css?v=2.5">
   <style>
     .search-group { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--border-subtle); border-radius: 8px; }
     .search-group svg { color: var(--text-muted); flex-shrink: 0; }
@@ -44,52 +44,52 @@
           <span class="stat-pill" id="statFileSize">0 KB</span>
         </div>
 
-        <button class="btn btn-secondary" id="btnUploadNew" style="display: none;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button class="btn btn-secondary" id="btnUploadNew" style="display: none;" title="Mở file PDF khác">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="17 8 12 3 7 8"></polyline>
             <line x1="12" y1="3" x2="12" y2="15"></line>
           </svg>
-          Mở tệp khác
+          Mở tệp
         </button>
 
         <button class="btn btn-secondary" id="btnExportPdf" style="display: none;" title="Xuất file PDF giữ nguyên chất lượng gốc">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="7 10 12 15 17 10"></polyline>
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
-          <span>Xuất thường</span>
+          <span>Xuất PDF</span>
         </button>
 
         <button class="btn btn-primary" id="btnOpenCompressModal" style="display: none;" title="Mở bảng điều khiển nén & tối ưu hóa dung lượng">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="4" y="4" width="16" height="16" rx="2"></rect>
             <path d="M9 9h6v6H9z"></path>
             <path d="M15 4v5M9 4v5M15 15v5M9 15v5"></path>
           </svg>
-          <span>Nén & Xuất file</span>
+          <span>Nén & Xuất</span>
         </button>
 
         <button class="btn btn-secondary" id="btnSaveProject" style="display: none;" title="Lưu toàn bộ phiên làm việc (trang, nhóm, xoay, ký, metadata) ra file .pdfcraft.json">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
             <polyline points="17 21 17 13 7 13 7 21"></polyline>
             <polyline points="7 3 7 8 15 8"></polyline>
           </svg>
-          <span>Lưu project</span>
+          <span>Lưu</span>
         </button>
 
         <button class="btn btn-secondary" id="btnLoadProject" title="Mở file project .pdfcraft.json đã lưu để tiếp tục làm việc">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
           </svg>
-          <span>Mở project</span>
+          <span>Project</span>
         </button>
         <input type="file" id="projectFileInput" accept=".json,.pdfcraft.json,application/json" style="display: none;">
 
         <button class="btn btn-secondary" id="btnConvertOffice" title="Chuyển file Word/Excel/PowerPoint sang PDF (cần LibreOffice)">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
             <polyline points="14 2 14 8 20 8"></polyline>
             <polyline points="9 15 12 12 15 12"></polyline>
@@ -100,7 +100,7 @@
         <input type="file" id="convertFileInput" accept=".docx,.doc,.odt,.rtf,.xlsx,.xls,.ods,.csv,.pptx,.ppt,.odp" multiple style="display: none;">
 
         <button class="btn btn-secondary" id="btnOutline" title="Xem mục lục (bookmark) tài liệu">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="8" y1="6" x2="21" y2="6"></line>
             <line x1="8" y1="12" x2="21" y2="12"></line>
             <line x1="8" y1="18" x2="21" y2="18"></line>
@@ -112,7 +112,7 @@
         </button>
 
         <button class="btn btn-quit" id="btnQuitApp" title="Đóng và thoát ứng dụng PDF Craft">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
             <line x1="12" y1="2" x2="12" y2="12"></line>
           </svg>
@@ -207,6 +207,42 @@
                 <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
               </svg>
               Đảo ngược thứ tự
+            </button>
+
+            <div class="arrange-group" role="group" aria-label="Di chuyển trang đã chọn">
+              <button class="btn btn-tool btn-icon-only" id="btnMoveStart" disabled title="Đưa trang đã chọn lên đầu (Alt+Home)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="18 17 11 10 18 3"></polyline><line x1="6" y1="19" x2="6" y2="5"></line>
+                </svg>
+              </button>
+              <button class="btn btn-tool btn-icon-only" id="btnMoveLeft" disabled title="Di chuyển trang đã chọn sang trái (Alt+←)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>
+                </svg>
+              </button>
+              <button class="btn btn-tool btn-icon-only" id="btnMoveRight" disabled title="Di chuyển trang đã chọn sang phải (Alt+→)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+              </button>
+              <button class="btn btn-tool btn-icon-only" id="btnMoveEnd" disabled title="Đưa trang đã chọn xuống cuối (Alt+End)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="6 3 13 10 6 17"></polyline><line x1="18" y1="5" x2="18" y2="19"></line>
+                </svg>
+              </button>
+              <button class="btn btn-tool btn-icon-only" id="btnMoveToPos" disabled title="Chuyển trang đã chọn tới vị trí số…">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="14" y2="15"></line><polyline points="16 3 20 7 16 11"></polyline>
+                </svg>
+              </button>
+            </div>
+
+            <button class="btn btn-tool" id="btnRestoreOrder" title="Đưa các trang về đúng thứ tự khi nạp file ban đầu">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="1 4 1 10 7 10"></polyline>
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+              </svg>
+              Thứ tự gốc
             </button>
 
             <button class="btn btn-tool" id="btnUndo" disabled title="Hoàn tác thao tác gần nhất (Ctrl+Z)">
@@ -374,15 +410,15 @@
               <line x1="12" y1="16" x2="12" y2="12"></line>
               <line x1="12" y1="8" x2="12.01" y2="8"></line>
             </svg>
-            <span>Kéo thẻ để di chuyển vị trí. Giữ <strong>Shift + Click</strong> để chọn nhanh dải trang. Nhấp tên để sửa tên.</span>
+            <span>Kéo thẻ để đổi thứ tự. Chọn nhiều trang rồi dùng <strong>Alt+←/→</strong> hoặc nút <strong>Di chuyển</strong> để sắp xếp không cần kéo.</span>
           </div>
           <div class="shortcut-pills">
             <span class="shortcut-badge"><kbd>Shift+Click</kbd> Chọn dải</span>
             <span class="shortcut-badge"><kbd>Ctrl+A</kbd> Chọn hết</span>
+            <span class="shortcut-badge"><kbd>Alt+←/→</kbd> Di chuyển</span>
             <span class="shortcut-badge"><kbd>Ctrl+Z</kbd> Hoàn tác</span>
-            <span class="shortcut-badge"><kbd>Ctrl+Y</kbd> Làm lại</span>
             <span class="shortcut-badge"><kbd>Del</kbd> Xóa</span>
-            <span class="shortcut-badge"><kbd>R</kbd> Xoay đã chọn</span>
+            <span class="shortcut-badge"><kbd>R</kbd> Xoay</span>
           </div>
         </div>
 
@@ -921,7 +957,7 @@
                   </div>
                   <p class="sign-hint">Nhấp thẻ để chọn, rồi bấm “Đưa lên trang” — hoặc bấm “Dùng dấu” ngay trên thẻ.</p>
                   <div class="stamp-library-grid" id="stampLibraryGrid">
-                    <div class="stamp-lib-empty">Chưa có ảnh con dấu nào. Tải lên dấu công ty, dấu chức danh, chữ ký scan… để dùng lại bất kỳ lúc nào!</div>
+                    <div class="stamp-lib-empty">Chưa có ảnh nào — tải dấu công ty, chức danh hoặc chữ ký scan để dùng lại.</div>
                   </div>
                 </div>
               </div>
@@ -1212,7 +1248,7 @@
 
         <div class="modal-footer sign-modal-footer">
           <div class="sign-footer-hint">
-            💡 <strong>Mẹo:</strong> Kéo dấu để di chuyển • Mũi tên <code>1px</code> (Shift: 10px) • <code>Delete</code> xóa • <code>Ctrl+D</code> nhân bản • <code>Ctrl+cuộn</code> zoom.
+            💡 Kéo dấu để di chuyển • <code>←↑↓→</code> 1px (Shift: 10px) • <code>Delete</code> xóa • <code>Ctrl+D</code> nhân bản • <code>Ctrl+cuộn</code> zoom
           </div>
           <div class="sign-footer-actions">
             <button type="button" class="btn btn-tool" id="btnCancelSign">Hủy</button>
@@ -1326,6 +1362,6 @@
   </div>
 
   <script src="utils.js?v=2.4" defer></script>
-  <script src="app.js?v=2.4" defer></script>
+  <script src="app.js?v=2.5" defer></script>
 </body>
 </html>
