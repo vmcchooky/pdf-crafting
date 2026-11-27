@@ -120,6 +120,7 @@ func handleFinalizeExport(w http.ResponseWriter, r *http.Request) {
 	const maxBodyBytes = 512 * 1024 * 1024
 	const maxBookmarksBytes = 4 * 1024 * 1024
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	// #nosec G120 -- the request body is capped above; parsing keeps 16 MiB in memory and spills the rest to bounded temp files.
 	if err := r.ParseMultipartForm(16 << 20); err != nil {
 		http.Error(w, "Không đọc được dữ liệu xuất PDF (giới hạn 512 MB)", http.StatusBadRequest)
 		return
@@ -155,8 +156,14 @@ func handleFinalizeExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer os.RemoveAll(workDir)
+	workRoot, err := os.OpenRoot(workDir)
+	if err != nil {
+		http.Error(w, "Không mở được thư mục tạm", http.StatusInternalServerError)
+		return
+	}
+	defer workRoot.Close()
 
-	input, err := os.OpenFile(filepath.Join(workDir, "input.pdf"), os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0600)
+	input, err := workRoot.OpenFile("input.pdf", os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0600)
 	if err != nil {
 		http.Error(w, "Không tạo được tệp PDF tạm", http.StatusInternalServerError)
 		return
@@ -182,7 +189,7 @@ func handleFinalizeExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := os.Open(outputPath)
+	result, err := workRoot.Open("finalized.pdf")
 	if err != nil {
 		http.Error(w, "Không đọc được PDF đã hoàn thiện", http.StatusInternalServerError)
 		return
