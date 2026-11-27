@@ -26,7 +26,7 @@ import (
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
-	"github.com/user/pdfcraft/pkg/pdfcraft"
+	"github.com/vmcchooky/pdf-crafting/go/pkg/pdfcraft"
 )
 
 //go:embed all:web
