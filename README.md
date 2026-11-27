@@ -32,7 +32,7 @@ pdf-crafting/
 ├── pyproject.toml            # Đóng gói Python (pip install .)
 ├── .github/workflows/ci.yml  # CI: pytest + go test + node --test
 ├── examples/                 # Tệp PDF mẫu để dùng thử
-├── python/                   # Bản cài đặt và thư viện Python
+├── legacy/python/            # Bản Python — ĐÃ ĐÓNG BĂNG (chỉ còn vai trò tham chiếu lịch sử, không phát triển tiếp)
 │   ├── pdfcraft/             # Package lõi: PdfDocument & CLI
 │   │   ├── __init__.py
 │   │   ├── core.py           # Core logic (đọc, tách, gộp, xoay, merge, mã hóa, metadata, watermark, nén)
@@ -122,12 +122,16 @@ Bạn có thể chạy trực tiếp `pdfcraft.exe` trên terminal/PowerShell m�
 
 ---
 
-## 🐍 Cách 2: Sử dụng qua Python
+## 🐍 Cách 2: Sử dụng qua Python (bản đóng băng)
+
+> Bản Python đã **đóng băng** từ 2026-11-27 (xem `ENGINEERING-ROADMAP.md`):
+> mã nguồn nằm ở `legacy/python/`, chỉ giữ làm tham chiếu — tính năng mới
+> chỉ phát triển trên bản Go. Phần dưới đây mô tả cách chạy nó như trước.
 
 ### Cài đặt:
 ```bash
 pip install .
-# hoặc dùng trực tiếp: $env:PYTHONPATH="python"; python -m pdfcraft ...
+# hoặc dùng trực tiếp: $env:PYTHONPATH="legacy/python"; python -m pdfcraft ...
 ```
 
 ### Dòng lệnh (đủ 17 lệnh, cú pháp tương đương bản Go):
