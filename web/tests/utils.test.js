@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { LRUCache, escapeHtml, formatBytes, normalizeText, findTextMatches } = require('../utils.js');
+const { LRUCache, escapeHtml, formatBytes, normalizeText, findTextMatches, remapOutlineTree } = require('../utils.js');
 
 describe('LRUCache', () => {
   it('stores and retrieves values', () => {
@@ -105,5 +105,32 @@ describe('findTextMatches', () => {
   it('supports accent-sensitive mode', () => {
     const res = findTextMatches(pages, 'bao cao', { accentInsensitive: false });
     assert.deepEqual(res, []);
+  });
+});
+
+describe('remapOutlineTree', () => {
+  it('maps nested bookmarks to the first exported page numbers', () => {
+    const tree = remapOutlineTree([
+      { title: 'Part A', pageIndex: 2, kids: [{ title: 'Details', pageIndex: 0, kids: [] }] },
+    ], new Map([[0, 2], [2, 1]]));
+    assert.deepEqual(tree, [
+      { title: 'Part A', page: 1, kids: [{ title: 'Details', page: 2, kids: [] }] },
+    ]);
+  });
+
+  it('drops omitted targets and promotes surviving children', () => {
+    const tree = remapOutlineTree([
+      { title: 'Removed page', pageIndex: 4, kids: [{ title: 'Kept child', pageIndex: 1, kids: [] }] },
+    ], new Map([[1, 3]]));
+    assert.deepEqual(tree, [{ title: 'Kept child', page: 3, kids: [] }]);
+  });
+
+  it('keeps structural headings and uses their first child as destination', () => {
+    const tree = remapOutlineTree([
+      { title: 'Heading', pageIndex: null, kids: [{ title: 'Section', pageIndex: 2, kids: [] }] },
+    ], new Map([[2, 4]]));
+    assert.deepEqual(tree, [
+      { title: 'Heading', page: 4, kids: [{ title: 'Section', page: 4, kids: [] }] },
+    ]);
   });
 });

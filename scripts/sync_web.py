@@ -35,6 +35,8 @@ FILES = [
     "vendor/pdf-lib.min.js",
     "vendor/pdf.min.js",
     "vendor/pdf.worker.min.js",
+    "vendor/fflate.umd.js",
+    "vendor/fflate.LICENSE.txt",
 ]
 
 

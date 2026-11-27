@@ -738,7 +738,7 @@ body.is-marquee-selecting * {
   cursor: grabbing;
 }
 
-/* Live-gap kéo thả: khối đang kéo = “ghost” trong khe hở, các thẻ khác trượt né */
+/* Giữ lưới ổn định trong lúc kéo; chỉ nhấn mạnh thẻ nguồn và vạch vị trí chèn. */
 .pages-grid.dragging-active .page-card {
   transition: transform 0.14s cubic-bezier(0.2, 0, 0.1, 1),
     margin 0.14s cubic-bezier(0.2, 0, 0.1, 1),
@@ -794,6 +794,39 @@ body.is-marquee-selecting * {
   width: 4px;
   border-radius: 4px;
   background: linear-gradient(to bottom, #6366f1, #a855f7);
+  box-shadow: 0 0 14px #6366f1, 0 0 24px #a855f7;
+  animation: pulseIndicator 0.8s ease-in-out infinite alternate;
+  z-index: 20;
+}
+
+.page-card.drag-over-top,
+.page-card.drag-over-bottom {
+  position: relative;
+}
+
+.page-card.drag-over-top::before {
+  content: '';
+  position: absolute;
+  top: -10px;
+  left: -4px;
+  right: -4px;
+  height: 4px;
+  border-radius: 4px;
+  background: linear-gradient(to right, #6366f1, #a855f7);
+  box-shadow: 0 0 14px #6366f1, 0 0 24px #a855f7;
+  animation: pulseIndicator 0.8s ease-in-out infinite alternate;
+  z-index: 20;
+}
+
+.page-card.drag-over-bottom::after {
+  content: '';
+  position: absolute;
+  bottom: -10px;
+  left: -4px;
+  right: -4px;
+  height: 4px;
+  border-radius: 4px;
+  background: linear-gradient(to right, #6366f1, #a855f7);
   box-shadow: 0 0 14px #6366f1, 0 0 24px #a855f7;
   animation: pulseIndicator 0.8s ease-in-out infinite alternate;
   z-index: 20;
@@ -1816,6 +1849,23 @@ input[type="range"]#rngOfficialAngle::-moz-range-track {
   color: var(--text-primary);
 }
 
+.compress-impact-summary {
+  margin-top: 12px;
+  padding: 11px 14px;
+  border: 1px solid rgba(59, 130, 246, 0.42);
+  border-radius: var(--radius-md);
+  background: rgba(30, 64, 175, 0.12);
+  color: #bfdbfe;
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.compress-impact-summary.has-impact {
+  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(120, 53, 15, 0.18);
+  color: #fde68a;
+}
+
 .compress-progress-box {
   background: rgba(15, 23, 42, 0.85);
   border: 1px solid rgba(99, 102, 241, 0.35);
@@ -2030,6 +2080,26 @@ input[type="range"]#rngOfficialAngle::-moz-range-track {
 }
 
 /* ---------- Studio shell: rail + panel + stage ---------- */
+.sign-visual-signature-note {
+  margin: 10px 16px 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(245, 158, 11, 0.38);
+  border-radius: var(--radius-sm);
+  background: rgba(120, 53, 15, 0.14);
+  color: #fde68a;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.modal [role="tab"]:focus-visible,
+.modal input:focus-visible,
+.modal button:focus-visible,
+.modal select:focus-visible,
+.modal textarea:focus-visible {
+  outline: 2px solid #a5b4fc;
+  outline-offset: 2px;
+}
+
 .sign-studio-body {
   flex: 1;
   display: grid;
