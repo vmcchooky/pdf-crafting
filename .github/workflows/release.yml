@@ -39,6 +39,7 @@ jobs:
     needs: release-windows
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
@@ -52,4 +53,6 @@ jobs:
             SHA256SUMS.txt
             HUONG-DAN.md
             go/pkg/pdfcraft/fonts/OFL.txt
+            go/pkg/pdfcraft/fonts/NOTICE.md
+          fail_on_unmatched_files: true
           generate_release_notes: true
