@@ -5,11 +5,38 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 
 	"github.com/vmcchooky/pdf-crafting/go/pkg/pdfcraft"
 )
+
+// printVersion in thông tin phiên bản từ dữ liệu build mà Go tự nhúng
+// (module version + VCS revision khi build từ checkout git) — không cần
+// biến phiên bản duy trì bằng tay.
+func printVersion() {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		fmt.Println("pdfcraft (không rõ thông tin build)")
+		return
+	}
+	version := info.Main.Version
+	if version == "" || version == "(devel)" {
+		version = "dev"
+	}
+	rev := ""
+	for _, s := range info.Settings {
+		if s.Key == "vcs.revision" {
+			rev = s.Value
+		}
+	}
+	if rev != "" {
+		fmt.Printf("pdfcraft %s (commit %s, %s)\n", version, rev[:min(12, len(rev))], info.GoVersion)
+	} else {
+		fmt.Printf("pdfcraft %s (%s)\n", version, info.GoVersion)
+	}
+}
 
 func printUsage() {
 	fmt.Println("pdfcraft (Go native) - Công cụ xử lý PDF siêu tốc và tối ưu")
@@ -35,6 +62,7 @@ func printUsage() {
 	fmt.Println("  convert <a.docx> <b.xlsx> [...] [-d <thư_mục>] [--engine <soffice>]  Chuyển Office sang PDF hàng loạt")
 	fmt.Println("  ui      [-p <cổng, mặc định 8080>] [tệp.pdf]  Khởi chạy Giao diện Web UI kéo thả mượt mà")
 	fmt.Println("  open    <tệp.pdf>                             Khởi chạy Web UI và nạp ngay tệp PDF chỉ định")
+	fmt.Println("  version                                       Xem phiên bản và thông tin build")
 	fmt.Println("  register-menu                                 Đăng ký PDF Craft vào Menu chuột phải Windows")
 	fmt.Println("  unregister-menu                               Gỡ bỏ PDF Craft khỏi Menu chuột phải Windows")
 	fmt.Println("  merge-context <a.pdf> [b.pdf ...]             (Menu chuột phải) Gộp các file thành *_merged.pdf")
@@ -113,6 +141,8 @@ func main() {
 	}
 
 	switch command {
+	case "version", "--version", "-v":
+		printVersion()
 	case "open":
 		fileArg := ""
 		var uiArgs []string
