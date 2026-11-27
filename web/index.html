@@ -35,7 +35,6 @@
         </div>
         <div class="brand-info">
           <h1 class="brand-title">PDF Craft</h1>
-          <span class="brand-badge">Native Engine</span>
         </div>
       </div>
 
@@ -54,7 +53,7 @@
           Mở tệp
         </button>
 
-        <button class="btn btn-secondary" id="btnExportPdf" style="display: none;" title="Xuất file PDF giữ nguyên chất lượng gốc">
+        <button class="btn btn-primary" id="btnExportPdf" style="display: none;" title="Xuất file PDF giữ nguyên chất lượng gốc">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="7 10 12 15 17 10"></polyline>
@@ -63,7 +62,7 @@
           <span>Xuất PDF</span>
         </button>
 
-        <button class="btn btn-primary" id="btnOpenCompressModal" style="display: none;" title="Mở bảng điều khiển nén & tối ưu hóa dung lượng">
+        <button class="btn btn-secondary" id="btnOpenCompressModal" style="display: none;" title="Mở bảng điều khiển nén & tối ưu hóa dung lượng">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="4" y="4" width="16" height="16" rx="2"></rect>
             <path d="M9 9h6v6H9z"></path>
@@ -135,28 +134,22 @@
               <polyline points="9 15 12 12 15 15"></polyline>
             </svg>
           </div>
-          <h2 class="upload-heading">Kéo & Thả các tệp PDF vào đây</h2>
-          <p class="upload-subtext">hoặc chọn một hoặc nhiều tệp từ máy tính để xem trước và sắp xếp các trang</p>
+          <h2 class="upload-heading">Mở tài liệu PDF để bắt đầu</h2>
+          <p class="upload-subtext">Kéo thả tệp vào đây hoặc chọn từ máy. Có thể nạp nhiều tệp cùng lúc.</p>
           <label class="btn btn-primary btn-lg" for="fileInput">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="17 8 12 3 7 8"></polyline>
               <line x1="12" y1="3" x2="12" y2="15"></line>
             </svg>
-            Chọn tệp PDF (hỗ trợ nhiều tệp)
+            Chọn tệp PDF
           </label>
           <input type="file" id="fileInput" accept="application/pdf" multiple style="display: none;">
           
-          <div class="upload-features">
-            <div class="feature-tag">📁 Nạp nhiều tệp cùng lúc</div>
-            <div class="feature-tag">✨ Kéo thả đổi vị trí siêu tốc</div>
-            <div class="feature-tag">🔍 Nhấn để xem chi tiết / mở tab mới</div>
-            <div class="feature-tag">✂️ Tách & Trích xuất trang</div>
-          </div>
+          <p class="upload-capabilities">Gộp · Tách · Xoay · Sắp xếp · Nén · Đóng dấu. Xử lý trên máy của bạn</p>
 
           <div class="upload-context-menu-box" id="contextMenuBox">
             <button class="btn btn-outline-cm" id="btnToggleContextMenu" type="button" title="Đăng ký hoặc gỡ bỏ 'Open with PDF Craft' khỏi Menu chuột phải Windows">
-              <span class="cm-icon">🖱️</span>
               <span id="txtContextMenu">Thêm vào Menu chuột phải Windows (<b>Open with PDF Craft</b>)</span>
             </button>
           </div>
@@ -211,22 +204,22 @@
             </button>
 
             <div class="arrange-group" role="group" aria-label="Di chuyển trang đã chọn">
-              <button class="btn btn-tool btn-icon-only" id="btnMoveStart" disabled title="Đưa trang đã chọn lên đầu (Alt+Home)">
+              <button class="btn btn-tool btn-icon-only" id="btnMoveStart" disabled title="Đưa trang đã chọn lên đầu (Home)">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="18 17 11 10 18 3"></polyline><line x1="6" y1="19" x2="6" y2="5"></line>
                 </svg>
               </button>
-              <button class="btn btn-tool btn-icon-only" id="btnMoveLeft" disabled title="Di chuyển trang đã chọn sang trái (Alt+←)">
+              <button class="btn btn-tool btn-icon-only" id="btnMoveLeft" disabled title="Di chuyển trang đã chọn sang trái (←)">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>
                 </svg>
               </button>
-              <button class="btn btn-tool btn-icon-only" id="btnMoveRight" disabled title="Di chuyển trang đã chọn sang phải (Alt+→)">
+              <button class="btn btn-tool btn-icon-only" id="btnMoveRight" disabled title="Di chuyển trang đã chọn sang phải (→)">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline>
                 </svg>
               </button>
-              <button class="btn btn-tool btn-icon-only" id="btnMoveEnd" disabled title="Đưa trang đã chọn xuống cuối (Alt+End)">
+              <button class="btn btn-tool btn-icon-only" id="btnMoveEnd" disabled title="Đưa trang đã chọn xuống cuối (End)">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="6 3 13 10 6 17"></polyline><line x1="18" y1="5" x2="18" y2="19"></line>
                 </svg>
@@ -411,12 +404,13 @@
               <line x1="12" y1="16" x2="12" y2="12"></line>
               <line x1="12" y1="8" x2="12.01" y2="8"></line>
             </svg>
-            <span>Kéo thẻ để đổi thứ tự. Chọn nhiều trang rồi dùng <strong>Alt+←/→</strong> hoặc nút <strong>Di chuyển</strong> để sắp xếp không cần kéo.</span>
+            <span>Kéo thẻ để đổi thứ tự. Chọn nhiều trang rồi dùng <strong>←/→</strong> hoặc <strong>Home/End</strong> (hay nút <strong>Di chuyển</strong>) để sắp xếp không cần kéo.</span>
           </div>
           <div class="shortcut-pills">
             <span class="shortcut-badge"><kbd>Shift+Click</kbd> Chọn dải</span>
             <span class="shortcut-badge"><kbd>Ctrl+A</kbd> Chọn hết</span>
-            <span class="shortcut-badge"><kbd>Alt+←/→</kbd> Di chuyển</span>
+            <span class="shortcut-badge"><kbd>←/→</kbd> Di chuyển</span>
+            <span class="shortcut-badge"><kbd>Home/End</kbd> Về đầu/cuối</span>
             <span class="shortcut-badge"><kbd>Ctrl+Z</kbd> Hoàn tác</span>
             <span class="shortcut-badge"><kbd>Del</kbd> Xóa</span>
             <span class="shortcut-badge"><kbd>R</kbd> Xoay</span>
@@ -428,6 +422,13 @@
           <div class="page-card" draggable="true">
             <div class="card-header">
               <div class="card-header-left" data-action="select-card" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <span class="card-drag-handle" title="Kéo để đổi vị trí trang" aria-hidden="true">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                    <circle cx="3" cy="2.5" r="1"></circle><circle cx="9" cy="2.5" r="1"></circle>
+                    <circle cx="3" cy="6" r="1"></circle><circle cx="9" cy="6" r="1"></circle>
+                    <circle cx="3" cy="9.5" r="1"></circle><circle cx="9" cy="9.5" r="1"></circle>
+                  </svg>
+                </span>
                 <input type="checkbox" class="custom-checkbox" data-action="select-card">
                 <span class="card-num-badge"></span>
               </div>
@@ -675,15 +676,15 @@
             <span class="compress-presets-label">Cấu hình nhanh:</span>
             <div class="compress-presets-list">
               <button type="button" class="btn btn-tool btn-sm" id="presetBalanced" data-tooltip="DPI 150, Chất lượng 75%, giữ nguyên màu. Cân bằng tối ưu kích thước và độ nét.">
-                <span>⚖️ Cân bằng</span>
+                <span>Cân bằng</span>
                 <span class="help-tip" data-tooltip="DPI 150, Chất lượng 75%, giữ nguyên màu. Cân bằng tối ưu kích thước và độ nét.">?</span>
               </button>
               <button type="button" class="btn btn-tool btn-sm active" id="presetMaxCompress" data-tooltip="DPI 96, Chất lượng 40%, thang xám. Dung lượng siêu nhỏ cho tệp nhẹ nhất.">
-                <span>🚀 Nén tối đa</span>
+                <span>Nén tối đa</span>
                 <span class="help-tip" data-tooltip="DPI 96, Chất lượng 40%, thang xám. Dung lượng siêu nhỏ cho tệp nhẹ nhất.">?</span>
               </button>
               <button type="button" class="btn btn-tool btn-sm" id="presetHighQuality" data-tooltip="DPI 300, Chất lượng 90%, giữ nguyên màu. Thích hợp cho in ấn và trình chiếu chất lượng cao.">
-                <span>🎨 Nét cao</span>
+                <span>Nét cao</span>
                 <span class="help-tip" data-tooltip="DPI 300, Chất lượng 90%, giữ nguyên màu. Thích hợp cho in ấn và trình chiếu chất lượng cao.">?</span>
               </button>
             </div>
