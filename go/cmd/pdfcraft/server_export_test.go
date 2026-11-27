@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/user/pdfcraft/pkg/pdfcraft"
+	"github.com/vmcchooky/pdf-crafting/go/pkg/pdfcraft"
 )
 
 func newFinalizeRequest(t *testing.T, pdfData, bookmarkData []byte) *http.Request {

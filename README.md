@@ -14,7 +14,7 @@ Một công cụ chuyên dụng, tốc độ cao cho phép thao tác các tệp 
 - **Sửa metadata** Tiêu đề/Tác giả/Chủ đề... (`meta`, qua Web UI).
 - **Đóng dấu chìm chữ** DRAFT/BẢN NHÁP... (`watermark`).
 - **Tối ưu giảm dung lượng** không mất dữ liệu (`compress`).
-- **Chuyển Office sang PDF hàng loạt** (`convert` a.docx b.xlsx — cần LibreOffice).
+- **Chuyển Office sang PDF hàng loạt** (`convert` a.docx b.xlsx — dùng LibreOffice hoặc Microsoft Office có sẵn).
 - **Menu chuột phải Windows**: mở bằng PDF Craft, gộp nhiều file, nén nhanh.
 - **Web UI trực quan**: kéo thả đổi thứ tự, Undo/Redo, tìm kiếm text không dấu, nhóm trang, ký & đóng dấu, nén ảnh, lưu/tải project (`.pdfcraft.json`).
 
@@ -30,9 +30,9 @@ Công cụ được xây dựng và kiểm thử hoàn chỉnh bằng **Python**
 pdf-crafting/
 ├── pdfcraft.exe              # Artifact phát hành (tải từ GitHub Releases, không commit; build từ Go, xem dưới)
 ├── pyproject.toml            # Đóng gói Python (pip install .)
-├── .github/workflows/ci.yml  # CI: pytest + go test + node --test
+├── .github/workflows/ci.yml  # CI: go test -race + qpdf + benchmark + node --test + Playwright
 ├── examples/                 # Tệp PDF mẫu để dùng thử
-├── python/                   # Bản cài đặt và thư viện Python
+├── legacy/python/            # Bản Python — ĐÃ ĐÓNG BĂNG (chỉ còn vai trò tham chiếu lịch sử, không phát triển tiếp)
 │   ├── pdfcraft/             # Package lõi: PdfDocument & CLI
 │   │   ├── __init__.py
 │   │   ├── core.py           # Core logic (đọc, tách, gộp, xoay, merge, mã hóa, metadata, watermark, nén)
@@ -42,7 +42,7 @@ pdf-crafting/
 │   └── tests/                # Bộ test tự động bằng pytest
 ├── go/                       # Bản refactor Go (pdfcpu engine + ledongthuc/pdf cho text)
 │   ├── go.mod
-│   ├── cmd/pdfcraft/         # CLI Go (17 lệnh) + server Web UI (initial-file, context-menu, /api/optimize, /api/convert)
+│   ├── cmd/pdfcraft/         # CLI Go (24 lệnh) + server Web UI (initial-file, context-menu, /api/optimize, /api/convert)
 │   └── pkg/pdfcraft/         # Thư viện Go & bộ unit test Go (document.go, office.go)
 ├── web/                      # Giao diện Web UI kéo thả (100% offline)
 │   ├── index.html
@@ -101,9 +101,9 @@ Bạn có thể chạy trực tiếp `pdfcraft.exe` trên terminal/PowerShell m�
 .\pdfcraft.exe watermark doc.pdf --text "DRAFT" --pages 1-2 --font-size 48 --rotation 45 --opacity 0.3 -o doc_wm.pdf
 .\pdfcraft.exe compress doc.pdf -o doc_small.pdf
 ```
-*Lưu ý: watermark dùng font Helvetica built-in nên chữ có dấu tiếng Việt có thể không hiển thị đúng. File mã hóa cần `decrypt` trước khi `meta`/`watermark`/`compress`.*
+*Lưu ý: watermark tiếng Việt tự dùng font Unicode nhúng sẵn (PDFCraftSans) nên hiển thị đúng dấu; văn bản Latin thường vẫn dùng Helvetica. File mã hóa cần `decrypt` trước khi `meta`/`watermark`/`compress`.*
 
-### Chuyển Office sang PDF (`convert`, cần LibreOffice)
+### Chuyển Office sang PDF (`convert`: LibreOffice hoặc Microsoft Office)
 ```bash
 .\pdfcraft.exe convert a.docx b.xlsx -d ./pdf_out/
 .\pdfcraft.exe convert *.docx --engine "C:\Program Files\LibreOffice\program\soffice.exe"
@@ -122,15 +122,19 @@ Bạn có thể chạy trực tiếp `pdfcraft.exe` trên terminal/PowerShell m�
 
 ---
 
-## 🐍 Cách 2: Sử dụng qua Python
+## 🐍 Cách 2: Sử dụng qua Python (bản đóng băng)
+
+> Bản Python đã **đóng băng** từ 2026-11-27 (xem `ENGINEERING-ROADMAP.md`):
+> mã nguồn nằm ở `legacy/python/`, chỉ giữ làm tham chiếu — tính năng mới
+> chỉ phát triển trên bản Go. Phần dưới đây mô tả cách chạy nó như trước.
 
 ### Cài đặt:
 ```bash
 pip install .
-# hoặc dùng trực tiếp: $env:PYTHONPATH="python"; python -m pdfcraft ...
+# hoặc dùng trực tiếp: $env:PYTHONPATH="legacy/python"; python -m pdfcraft ...
 ```
 
-### Dòng lệnh (đủ 17 lệnh, cú pháp tương đương bản Go):
+### Dòng lệnh (bản Python legacy, 17 lệnh):
 ```bash
 python -m pdfcraft info examples/sample_doc.pdf [--password ...]
 python -m pdfcraft text examples/sample_doc.pdf --page 1
@@ -172,7 +176,7 @@ encrypt_pdf("doc.pdf", "enc.pdf", user_password="pw123")
 decrypt_pdf("enc.pdf", "doc.pdf", password="pw123")
 compress_pdf("doc.pdf", "small.pdf")
 
-from pdfcraft import convert_office_to_pdf  # cần LibreOffice
+from pdfcraft import convert_office_to_pdf  # legacy, cần LibreOffice
 convert_office_to_pdf(["a.docx", "b.xlsx"], output_dir="pdf_out/")
 ```
 
@@ -182,7 +186,7 @@ convert_office_to_pdf(["a.docx", "b.xlsx"], output_dir="pdf_out/")
 
 - Kéo thả nhiều file, xem trước thumbnail, kéo đổi thứ tự, chọn nhiều (Shift+Click, khung marquee, Ctrl+A).
 - Mở file PDF mã hóa: hộp nhập mật khẩu khi nạp file (thử lại khi sai, bỏ qua khi hủy). Lưu ý: xuất file từ nguồn mã hóa cần giải mã trước (`pdfcraft decrypt`).
-- **Office → PDF**: nút chuyển file Word/Excel/PowerPoint sang PDF ngay trong Web UI (cần LibreOffice, 1 file nạp vào workspace, nhiều file tải về ZIP).
+- **Office → PDF**: nút chuyển file Word/Excel/PowerPoint sang PDF ngay trong Web UI (LibreOffice, hoặc Microsoft Office trên Windows; 1 file nạp vào workspace, nhiều file tải về ZIP).
 - Xoay từng trang / xoay hàng loạt đã chọn (phím `R`), đảo ngược, Undo (Ctrl+Z) / Redo (Ctrl+Y).
 - **Tìm kiếm** nội dung toàn tài liệu, không phân biệt dấu (`/` để nhảy tới ô tìm kiếm).
 - Nhóm trang + xuất theo nhóm, tách từng trang, trích xuất đã chọn.
@@ -197,13 +201,12 @@ convert_office_to_pdf(["a.docx", "b.xlsx"], output_dir="pdf_out/")
 
 | Suite | Lệnh | Phạm vi |
 | :--- | :--- | :--- |
-| Python (pytest, 34 tests) | `python -m pytest python/tests -q` | parse page, load/info, split, extract, move, reorder, rotate, merge, insert, delete, encrypt/decrypt, metadata, watermark, compress, convert (mock engine), save an toàn, CLI |
-| Python gates | `ruff check`, `ruff format --check`, `mypy`, `pyright` | lint + format + type-check sạch |
+| Python legacy (pytest, 34 tests) | `python -m pytest legacy/python/tests -q` | Bản đóng băng — chỉ chạy tay khi cần tham chiếu |
 | Go (`go test`) | `cd go; go test ./...` | parse, info, split, extract, move, reorder, rotate, merge, text, encrypt/decrypt, metadata, watermark, compress, convert (lỗi), concurrent |
 | Web (Node, 13 tests) | `node --test web/tests/utils.test.js` | LRUCache, escapeHtml, formatBytes, chuẩn hóa dấu, tìm kiếm |
 | Web E2E (Playwright, 5 tests) | `cd web; npm install; npx playwright install chromium; npx playwright test` | upload, xoay+undo/redo, tìm kiếm, xuất file, metadata |
 
-CI (`.github/workflows/ci.yml`) chạy tất cả trên mỗi push/PR (gồm gates Python và E2E Chromium).
+CI (`.github/workflows/ci.yml`) chạy `go test -race`, `qpdf --check`, benchmark, Node unit và Playwright trên mỗi push/PR; bản Python legacy không còn nằm trong CI.
 
 ---
 
@@ -219,7 +222,7 @@ Kết quả đo đạc thực tế trên Windows bằng `python benchmark.py` (t
 | **Đọc info file scan 10tr (1.1 MB ảnh)** | 762.7 ms | **83.6 ms** | **Go nhanh gấp ~9.1 lần** ⚡ |
 | **Nén lossless file scan (`compress`)** | 751 ms | **146 ms** | **Go nhanh gấp ~5.1 lần** ⚡ |
 | **Mức tiêu thụ RAM** | ~50 - 80 MB | **~8 - 15 MB** | **Go tiết kiệm 5x RAM** 💾 |
-| **Tính độc lập khi phân phối** | Cần cài Python + pip + lib | **1 file .exe duy nhất (~10MB)** | Không cần cài đặt bất kỳ runtime nào 📦 |
+| **Tính độc lập khi phân phối** | Cần cài Python + pip + lib | **1 file .exe duy nhất (~15 MB)** | Không cần cài đặt bất kỳ runtime nào 📦 |
 
 ---
 

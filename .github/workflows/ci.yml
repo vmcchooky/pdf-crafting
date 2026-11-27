@@ -14,20 +14,6 @@ jobs:
           python-version: "3.12"
       - run: python scripts/sync_web.py --check
 
-  python:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install pypdf pillow pytest ruff mypy pyright
-      - run: python -m ruff check python/
-      - run: python -m ruff format --check python/
-      - run: python -m mypy python/pdfcraft/
-      - run: python -m pyright
-      - run: python -m pytest python/tests -q
-
   go:
     runs-on: ubuntu-latest
     steps:
@@ -40,7 +26,67 @@ jobs:
           test -z "$(gofmt -l .)"
           go build ./...
           go vet ./...
-          go test ./...
+          go test -race ./...
+      - name: Cross-build Windows (amd64, arm64)
+        working-directory: go
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          GOOS=windows GOARCH=amd64 go build ./...
+          GOOS=windows GOARCH=arm64 go build ./...
+
+  qpdf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+      - run: sudo apt-get update && sudo apt-get install -y qpdf
+      - name: Generate corpus outputs
+        working-directory: go
+        env:
+          PDFCRAFT_QPDF_OUTDIR: ${{ runner.temp }}/qpdf-out
+        run: go test ./pkg/pdfcraft -run TestCorpus -v
+      - name: Ensure corpus outputs were produced
+        run: |
+          set -euo pipefail
+          test -d "$RUNNER_TEMP/qpdf-out"
+          count=$(find "$RUNNER_TEMP/qpdf-out" -name '*.pdf' | wc -l)
+          echo "corpus PDFs: $count"
+          test "$count" -gt 0
+      - name: qpdf --check generated outputs and examples
+        run: |
+          set -euo pipefail
+          status=0
+          while IFS= read -r -d '' f; do
+            echo "-- $f"
+            qpdf --check "$f" || status=1
+          done < <(find "$RUNNER_TEMP/qpdf-out" examples -name '*.pdf' -print0)
+          exit $status
+
+  bench:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+      - name: Build baseline binary (origin/main)
+        run: |
+          git fetch --depth=1 origin main
+          git worktree add "$RUNNER_TEMP/main-tree" FETCH_HEAD
+          (cd "$RUNNER_TEMP/main-tree/go" && CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/pdfcraft-main" ./cmd/pdfcraft)
+      - name: Build branch binary
+        working-directory: go
+        run: CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/pdfcraft-head" ./cmd/pdfcraft
+      - name: Compare CLI performance (warn only)
+        run: |
+          python3 scripts/bench_compare.py \
+            --base "$RUNNER_TEMP/pdfcraft-main" \
+            --head "$RUNNER_TEMP/pdfcraft-head" \
+            --runs 5 --threshold 20
 
   go-sec:
     runs-on: ubuntu-latest

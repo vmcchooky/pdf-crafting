@@ -1,9 +1,9 @@
 {
   "include": [
     "benchmark.py",
-    "python"
+    "legacy/python"
   ],
   "extraPaths": [
-    "python"
+    "legacy/python"
   ]
 }

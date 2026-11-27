@@ -170,17 +170,37 @@ func SplitAll(pdfPath, outDir string) ([]string, error) {
 		return nil, fmt.Errorf("lỗi đọc số trang: %w", err)
 	}
 
-	// Tách từng trang bằng CollectFile để kiểm soát chính xác tên file
-	var createdFiles []string
+	// Tách bằng SplitFile của pdfcpu: đọc/phân tích tệp nguồn đúng MỘT lần
+	// rồi ghi mọi trang (bản cũ gọi CollectFile cho từng trang — phân tích
+	// lại toàn bộ tệp N lần; thử nghiệm worker-pool song song còn chậm hơn
+	// trên máy ít nhân và tốn RAM hơn, đã loại bỏ — xem benchmark).
+	// SplitFile đặt tên <base>_<trang>.pdf trong thư mục tạm riêng, sau đó
+	// từng tệp được chuyển về tên đích <base>_page_<trang>.pdf qua
+	// saveSafely để giữ nguyên tắc ghi nguyên tử.
 	baseName := strings.TrimSuffix(filepath.Base(absIn), filepath.Ext(absIn))
+	splitBase := strings.TrimSuffix(filepath.Base(absIn), ".pdf")
 
+	tmpDir, err := os.MkdirTemp(absOut, ".split_*")
+	if err != nil {
+		return nil, fmt.Errorf("không thể tạo thư mục tạm để tách trang: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := api.SplitFile(absIn, tmpDir, 1, nil); err != nil {
+		return nil, fmt.Errorf("lỗi tách trang: %w", err)
+	}
+
+	createdFiles := make([]string, count)
 	for i := 1; i <= count; i++ {
+		part := filepath.Join(tmpDir, fmt.Sprintf("%s_%d.pdf", splitBase, i))
 		targetFile := filepath.Join(absOut, fmt.Sprintf("%s_page_%d.pdf", baseName, i))
-		pageStr := strconv.Itoa(i)
-		if err := api.CollectFile(absIn, targetFile, []string{pageStr}, nil); err != nil {
+		err := saveSafely(absIn, targetFile, func(tempTarget string) error {
+			return copyFile(part, tempTarget)
+		})
+		if err != nil {
 			return nil, fmt.Errorf("lỗi trích xuất trang %d: %w", i, err)
 		}
-		createdFiles = append(createdFiles, targetFile)
+		createdFiles[i-1] = targetFile
 	}
 
 	return createdFiles, nil
@@ -201,7 +221,9 @@ func ExtractPages(pdfPath, outPath string, pageSelection []string) error {
 		return err
 	}
 
-	return api.CollectFile(absIn, absOut, pageSelection, nil)
+	return saveSafely(absIn, absOut, func(tempTarget string) error {
+		return api.CollectFile(absIn, tempTarget, pageSelection, nil)
+	})
 }
 
 // MovePage di chuyển trang từ fromPage sang toPage (1-based).
@@ -699,8 +721,19 @@ func AddTextWatermark(pdfPath, outPath, text string, pages []string, fontSize in
 	}
 	// nil = tất cả các trang (quy ước của pdfcpu)
 
-	desc := fmt.Sprintf("fontname:Helvetica, points:%d, rotation:%g, opacity:%g",
-		fontSize, rotation, opacity)
+	// Helvetica (font lõi) chỉ phủ bảng mã WinAnsi — văn bản có ký tự
+	// ngoài Latin-1 (điển hình: tiếng Việt) phải dùng font Unicode nhúng,
+	// nếu không dấu sẽ mất hoặc hiển thị sai.
+	fontName := "Helvetica"
+	if textNeedsUnicodeFont(text) {
+		if err := ensureWatermarkFont(); err != nil {
+			return fmt.Errorf("không cài được font Unicode cho watermark: %w", err)
+		}
+		fontName = watermarkFontName
+	}
+
+	desc := fmt.Sprintf("fontname:%s, points:%d, rotation:%g, opacity:%g",
+		fontName, fontSize, rotation, opacity)
 
 	return saveSafely(absIn, outPath, func(tempTarget string) error {
 		return api.AddTextWatermarksFile(absIn, tempTarget, selected, false, text, desc, nil)
@@ -780,7 +813,9 @@ func ExtractTextWithPassword(pdfPath, password string, pageSelection []string) (
 
 var tempCounter uint64
 
-// saveSafely hỗ trợ ghi an toàn (kể cả khi inPath trùng với outPath).
+// saveSafely ghi qua file tạm cùng thư mục rồi hoán đổi. Nếu rename thất bại
+// (ví dụ đích đang bị khóa) thì copy sang temp phụ rồi rename lại — không bao
+// giờ xóa hay ghi trực tiếp lên file đích trước khi thay thế thành công.
 func saveSafely(inPath, outPath string, writerFunc func(tempTarget string) error) error {
 	absOut, err := filepath.Abs(outPath)
 	if err != nil {
@@ -799,15 +834,19 @@ func saveSafely(inPath, outPath string, writerFunc func(tempTarget string) error
 		return err
 	}
 
-	// Đổi tên tệp tạm thành đích (hỗ trợ ghi đè an toàn trên Windows)
-	if err := os.Rename(tempFile, absOut); err != nil {
-		// Trên Windows, Rename có thể lỗi nếu absOut đã tồn tại -> xóa trước rồi rename
-		_ = os.Remove(absOut)
-		if err2 := os.Rename(tempFile, absOut); err2 != nil {
-			return copyFile(tempFile, absOut)
-		}
+	if err := os.Rename(tempFile, absOut); err == nil {
+		return nil
 	}
 
+	c2 := atomic.AddUint64(&tempCounter, 1)
+	replaceTemp := filepath.Join(filepath.Dir(absOut), fmt.Sprintf(".tmp_replace_%d_%d_%d.pdf", os.Getpid(), time.Now().UnixNano(), c2))
+	defer os.Remove(replaceTemp)
+	if err := copyFile(tempFile, replaceTemp); err != nil {
+		return fmt.Errorf("không thể thay thế tệp đích: %w", err)
+	}
+	if err := os.Rename(replaceTemp, absOut); err != nil {
+		return fmt.Errorf("không thể thay thế tệp đích: %w", err)
+	}
 	return nil
 }
 
@@ -832,7 +871,24 @@ func copyFile(src, dst string) error {
 	return err
 }
 
+// moveResultFile chuyển kết quả từ thư mục tạm (có thể khác ổ đĩa) về đích
+// qua file tạm cùng thư mục đích — không xóa đích trước khi thay thế thành
+// công, nên lỗi giữa chừng không làm mất file cũ.
+func moveResultFile(src, dst string) error {
+	return saveSafely(src, dst, func(tempTarget string) error {
+		return copyFile(src, tempTarget)
+	})
+}
+
 func init() {
 	// Ẩn log verbose của pdfcpu mặc định để CLI sạch sẽ
 	_ = model.ConfigPath
+
+	// pdfcpu khởi tạo cấu hình dùng chung một cách lười biếng và không khóa.
+	// Gọi sớm một lần để các thao tác PDF chạy song song (batch, Web UI) không
+	// đua nhau ghi config/font/cert vào thư mục người dùng.
+	func() {
+		defer func() { _ = recover() }()
+		_ = model.NewDefaultConfiguration()
+	}()
 }

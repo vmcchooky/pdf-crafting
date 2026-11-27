@@ -1,7 +1,8 @@
 # PDF Craft - Lộ trình tính năng mới (New Features Roadmap)
 
 > File ghi nhớ các tính năng dự kiến phát triển sau v1.1.0.
-> Quy ước: mỗi tính năng khi làm phải đồng bộ 3 nơi **Python (`python/pdfcraft/`)** + **Go (`go/pkg/pdfcraft/` + CLI)** + **Web UI (`web/`)** nếu phù hợp, kèm test (pytest / go test / node --test / Playwright).
+> Lộ trình kỹ thuật (hợp nhất về Go, phát hành plug-and-play): xem `ENGINEERING-ROADMAP.md` — quyết định ở đó thay đổi quy ước đồng bộ 3 nơi dưới đây sau khi Chặng 0 hoàn tất.
+> Quy ước: mỗi tính năng khi làm phải đồng bộ **Go (`go/pkg/pdfcraft/` + CLI)** + **Web UI (`web/`)** nếu phù hợp, kèm test (go test / node --test / Playwright). *(Cập nhật 2026-11-27: bản Python đã đóng băng ở `legacy/python/` — không còn đồng bộ tính năng sang Python; xem `ENGINEERING-ROADMAP.md`.)*
 
 ## ✅ Đang làm đầu tiên (ưu tiên cao nhất)
 
