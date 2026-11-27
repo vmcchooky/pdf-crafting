@@ -56,7 +56,8 @@ func uniqueOfficeOutput(outDir, stem string, reserved map[string]bool) string {
 }
 
 // ConvertOfficeToPdf chuyển hàng loạt file Office sang PDF, giữ đúng thứ tự đầu vào.
-// outDir trống = cùng thư mục file gốc. enginePath trống = tự tìm LibreOffice.
+// outDir trống = cùng thư mục file gốc. enginePath trống = tự tìm LibreOffice;
+// không có LibreOffice thì trên Windows tự dùng Microsoft Office (COM) nếu có.
 // Trả về danh sách file PDF đã tạo theo đúng thứ tự input.
 func ConvertOfficeToPdf(inputPaths []string, outDir, enginePath string, timeoutSec int) ([]string, error) {
 	if len(inputPaths) == 0 {
@@ -111,8 +112,15 @@ func ConvertOfficeToPdf(inputPaths []string, outDir, enginePath string, timeoutS
 	if engine == "" {
 		engine = FindOfficeEngine()
 	}
+	// Không có LibreOffice: trên Windows thử đường Microsoft Office COM
+	// (đa số máy cá nhân có sẵn MS Office); nơi khác thì báo rõ ràng.
+	useMSOffice := false
 	if engine == "" {
-		return nil, fmt.Errorf("không tìm thấy LibreOffice để chuyển đổi. Hãy cài LibreOffice (https://libreoffice.org) rồi thử lại, hoặc truyền -engine <đường_dẫn_soffice>")
+		if msOfficeAvailable() {
+			useMSOffice = true
+		} else {
+			return nil, fmt.Errorf("không tìm thấy LibreOffice hoặc Microsoft Office để chuyển đổi. Hãy cài LibreOffice (https://libreoffice.org) rồi thử lại, hoặc truyền -engine <đường_dẫn_soffice>")
+		}
 	}
 	if timeoutSec <= 0 {
 		timeoutSec = 180
@@ -155,20 +163,29 @@ func ConvertOfficeToPdf(inputPaths []string, outDir, enginePath string, timeoutS
 				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 				defer cancel()
 
-				args := []string{"--headless", "--convert-to", "pdf", "--outdir", tmpDir}
-				args = append(args, batch...)
-				// #nosec G204 -- engine là LibreOffice/MS Word đã kiểm chứng tồn tại, batch là file do người dùng chỉ định cho CLI cục bộ
-				cmd := exec.CommandContext(ctx, engine, args...)
-				out, err := cmd.CombinedOutput()
-				if ctx.Err() == context.DeadlineExceeded {
-					return fmt.Errorf("chuyển đổi quá thời gian (%ds), đã hủy", timeoutSec)
-				}
-				if err != nil {
-					detail := strings.TrimSpace(string(out))
-					if detail == "" {
-						detail = err.Error()
+				if useMSOffice {
+					if err := convertBatchMSOffice(ctx, batch, tmpDir); err != nil {
+						if ctx.Err() == context.DeadlineExceeded {
+							return fmt.Errorf("chuyển đổi quá thời gian (%ds), đã hủy", timeoutSec)
+						}
+						return err
 					}
-					return fmt.Errorf("không chạy được converter: %s", detail)
+				} else {
+					args := []string{"--headless", "--convert-to", "pdf", "--outdir", tmpDir}
+					args = append(args, batch...)
+					// #nosec G204 -- engine là LibreOffice đã kiểm chứng tồn tại, batch là file do người dùng chỉ định cho CLI cục bộ
+					cmd := exec.CommandContext(ctx, engine, args...)
+					out, err := cmd.CombinedOutput()
+					if ctx.Err() == context.DeadlineExceeded {
+						return fmt.Errorf("chuyển đổi quá thời gian (%ds), đã hủy", timeoutSec)
+					}
+					if err != nil {
+						detail := strings.TrimSpace(string(out))
+						if detail == "" {
+							detail = err.Error()
+						}
+						return fmt.Errorf("không chạy được converter: %s", detail)
+					}
 				}
 				for _, src := range batch {
 					stem := strings.TrimSuffix(filepath.Base(src), filepath.Ext(src))
