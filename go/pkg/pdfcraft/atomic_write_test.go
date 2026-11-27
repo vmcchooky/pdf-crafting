@@ -89,3 +89,46 @@ func TestSaveSafelyReplacesExistingFile(t *testing.T) {
 	}
 	assertNoTempFiles(t, dir)
 }
+
+func TestMoveResultFileReplacesDestination(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := t.TempDir()
+	src := filepath.Join(srcDir, "converted.pdf")
+	dest := filepath.Join(dir, "target.pdf")
+	if err := os.WriteFile(src, []byte("new"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := moveResultFile(src, dest); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "new" {
+		t.Fatalf("destination = %q, want new", data)
+	}
+	assertNoTempFiles(t, dir)
+}
+
+func TestMoveResultFileFailurePreservesDestination(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "target.pdf")
+	if err := os.WriteFile(dest, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := moveResultFile(filepath.Join(dir, "missing.pdf"), dest); err == nil {
+		t.Fatal("expected error for missing source")
+	}
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "old" {
+		t.Fatalf("destination changed after failure: %q", data)
+	}
+	assertNoTempFiles(t, dir)
+}

@@ -12,18 +12,24 @@ import (
 	"github.com/vmcchooky/pdf-crafting/go/pkg/pdfcraft"
 )
 
+// version được inject khi phát hành: -ldflags "-X main.version=v1.4.0".
+var version = ""
+
 // printVersion in thông tin phiên bản từ dữ liệu build mà Go tự nhúng
 // (module version + VCS revision khi build từ checkout git) — không cần
 // biến phiên bản duy trì bằng tay.
 func printVersion() {
 	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		fmt.Println("pdfcraft (không rõ thông tin build)")
-		return
+	display := version
+	if display == "" && ok {
+		display = info.Main.Version
 	}
-	version := info.Main.Version
-	if version == "" || version == "(devel)" {
-		version = "dev"
+	if display == "" || display == "(devel)" {
+		display = "dev"
+	}
+	if !ok {
+		fmt.Printf("pdfcraft %s\n", display)
+		return
 	}
 	rev := ""
 	for _, s := range info.Settings {
@@ -32,9 +38,9 @@ func printVersion() {
 		}
 	}
 	if rev != "" {
-		fmt.Printf("pdfcraft %s (commit %s, %s)\n", version, rev[:min(12, len(rev))], info.GoVersion)
+		fmt.Printf("pdfcraft %s (commit %s, %s)\n", display, rev[:min(12, len(rev))], info.GoVersion)
 	} else {
-		fmt.Printf("pdfcraft %s (%s)\n", version, info.GoVersion)
+		fmt.Printf("pdfcraft %s (%s)\n", display, info.GoVersion)
 	}
 }
 

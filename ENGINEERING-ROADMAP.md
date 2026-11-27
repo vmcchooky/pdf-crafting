@@ -10,7 +10,7 @@
 
 Hệ quả lên các chặng:
 - **Bỏ:** manifest winget (người nhận không dùng), ký số (thay bằng `HUONG-DAN.md` hướng dẫn qua SmartScreen 2 bước).
-- **Hoãn vô thời hạn:** biến thể CLI-only, corpus hồi quy + benchmark CI có ngưỡng, xử lý song song đa nhân, fallback MS Office COM — đều là tối ưu cho khán giả đại trà hoặc chưa có nhu cầu thật.
+- **Hoãn vô thời hạn:** biến thể CLI-only, corpus hồi quy + benchmark CI có ngưỡng, xử lý song song đa nhân, fallback MS Office COM — đều là tối ưu cho khán giả đại trà hoặc chưa có nhu cầu thật. *(Đã nâng lại và hoàn tất trong đợt 3 — xem "Cập nhật 2026-11-27 (tối)"; riêng CLI-only vẫn hoãn.)*
 - **Giữ và đã triển khai đợt 1 (27/11):**
   - [x] Module path Go: `github.com/user/pdfcraft` → `github.com/vmcchooky/pdf-crafting/go`.
   - [x] Ghi nguyên tử: kiểm chứng lại — `saveSafely` vốn đã phủ gần hết; đợt này bổ sung nốt `ExtractPages` và `SplitAll` → **100% đường ghi của bản Go** đi qua ghi tạm + hoán đổi.

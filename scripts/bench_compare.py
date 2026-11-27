@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """So sánh hiệu năng CLI pdfcraft: bản base (main) vs head (nhánh).
 
-Chỉ dùng stdlib. Đo xen kẽ base/head trên cùng máy để giảm nhiễu phần cứng.
-Không chặn CI: luôn exit 0, chỉ in cảnh báo khi chậm hơn ngưỡng.
+Chỉ dùng stdlib. Đo xen kẽ base/head trong từng lượt trên cùng máy để giảm
+nhiễu phần cứng. Job CI là non-blocking (continue-on-error): exit 0 khi đo
+xong; exit 1 nếu chính harness lỗi (thiếu binary, lệnh fail, timeout).
 """
 from __future__ import annotations
 
@@ -89,7 +90,10 @@ def write_scan_pdf(path: Path, w: int = 620, h: int = 877) -> None:
 
 def run_once(cmd: list[str]) -> float:
     start = time.perf_counter()
-    proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    try:
+        proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=180)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"command timed out after 180s: {' '.join(cmd)}") from exc
     elapsed = time.perf_counter() - start
     if proc.returncode != 0:
         raise RuntimeError(
@@ -99,28 +103,43 @@ def run_once(cmd: list[str]) -> float:
     return elapsed
 
 
-def measure(exe: Path, work: Path, runs: int) -> dict[str, list[float]]:
+METRICS = ("info50", "extract20", "split50", "compress50", "info_scan", "compress_scan")
+
+
+def measure_run(exe: Path, work: Path, pdf50: Path, scan: Path) -> dict[str, float]:
+    out = Path(tempfile.mkdtemp(dir=work, prefix="out_"))
+    return {
+        "info50": run_once([str(exe), "info", str(pdf50)]),
+        "info_scan": run_once([str(exe), "info", str(scan)]),
+        "extract20": run_once(
+            [str(exe), "extract", str(pdf50), "-pages", "1-20", "-o", str(out / "extract.pdf")]
+        ),
+        "split50": run_once([str(exe), "split", str(pdf50), "-d", str(out / "split")]),
+        "compress50": run_once(
+            [str(exe), "compress", str(pdf50), "-o", str(out / "compress.pdf")]
+        ),
+        "compress_scan": run_once(
+            [str(exe), "compress", str(scan), "-o", str(out / "compress_scan.pdf")]
+        ),
+    }
+
+
+def measure_pair(
+    base_exe: Path, head_exe: Path, work: Path, runs: int
+) -> tuple[dict[str, list[float]], dict[str, list[float]]]:
     pdf50 = work / "bench_50p.pdf"
     scan = work / "bench_scan.pdf"
-    timings: dict[str, list[float]] = {
-        k: []
-        for k in ("info50", "extract20", "split50", "compress50", "info_scan", "compress_scan")
-    }
-    for _ in range(runs):
-        out = Path(tempfile.mkdtemp(dir=work, prefix="out_"))
-        timings["info50"].append(run_once([str(exe), "info", str(pdf50)]))
-        timings["info_scan"].append(run_once([str(exe), "info", str(scan)]))
-        timings["extract20"].append(
-            run_once([str(exe), "extract", str(pdf50), "-pages", "1-20", "-o", str(out / "extract.pdf")])
-        )
-        timings["split50"].append(run_once([str(exe), "split", str(pdf50), "-d", str(out / "split")]))
-        timings["compress50"].append(
-            run_once([str(exe), "compress", str(pdf50), "-o", str(out / "compress.pdf")])
-        )
-        timings["compress_scan"].append(
-            run_once([str(exe), "compress", str(scan), "-o", str(out / "compress_scan.pdf")])
-        )
-    return timings
+    base: dict[str, list[float]] = {k: [] for k in METRICS}
+    head: dict[str, list[float]] = {k: [] for k in METRICS}
+    for run in range(runs):
+        order = [(base_exe, base), (head_exe, head)]
+        if run % 2 == 1:
+            order.reverse()
+        for exe, timings in order:
+            measured = measure_run(exe, work, pdf50, scan)
+            for key in METRICS:
+                timings[key].append(measured[key])
+    return base, head
 
 
 def main() -> int:
@@ -132,13 +151,15 @@ def main() -> int:
     parser.add_argument("--json", type=Path, default=None)
     args = parser.parse_args()
 
-    with tempfile.TemporaryDirectory(prefix="pdfcraft_bench_") as tmp:
-        work = Path(tmp)
-        write_text_pdf(work / "bench_50p.pdf")
-        write_scan_pdf(work / "bench_scan.pdf")
-
-        base = measure(args.base, work, args.runs)
-        head = measure(args.head, work, args.runs)
+    try:
+        with tempfile.TemporaryDirectory(prefix="pdfcraft_bench_") as tmp:
+            work = Path(tmp)
+            write_text_pdf(work / "bench_50p.pdf")
+            write_scan_pdf(work / "bench_scan.pdf")
+            base, head = measure_pair(args.base, args.head, work, args.runs)
+    except RuntimeError as exc:
+        print(f"::error title=Benchmark harness::{exc}")
+        return 1
 
     report = {}
     regressions = 0

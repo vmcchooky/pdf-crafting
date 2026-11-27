@@ -871,7 +871,24 @@ func copyFile(src, dst string) error {
 	return err
 }
 
+// moveResultFile chuyển kết quả từ thư mục tạm (có thể khác ổ đĩa) về đích
+// qua file tạm cùng thư mục đích — không xóa đích trước khi thay thế thành
+// công, nên lỗi giữa chừng không làm mất file cũ.
+func moveResultFile(src, dst string) error {
+	return saveSafely(src, dst, func(tempTarget string) error {
+		return copyFile(src, tempTarget)
+	})
+}
+
 func init() {
 	// Ẩn log verbose của pdfcpu mặc định để CLI sạch sẽ
 	_ = model.ConfigPath
+
+	// pdfcpu khởi tạo cấu hình dùng chung một cách lười biếng và không khóa.
+	// Gọi sớm một lần để các thao tác PDF chạy song song (batch, Web UI) không
+	// đua nhau ghi config/font/cert vào thư mục người dùng.
+	func() {
+		defer func() { _ = recover() }()
+		_ = model.NewDefaultConfiguration()
+	}()
 }

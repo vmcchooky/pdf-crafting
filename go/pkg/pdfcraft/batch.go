@@ -64,14 +64,11 @@ func ProcessBatch(count, workers int, task func(i int) (string, error)) []BatchR
 func uniqueBatchPath(dir, stem string, reserved map[string]bool) string {
 	candidate := filepath.Join(dir, stem+".pdf")
 	counter := 2
-	for {
-		if _, err := os.Stat(candidate); os.IsNotExist(err) && !reserved[candidate] {
-			break
-		}
+	for reserved[strings.ToLower(candidate)] {
 		candidate = filepath.Join(dir, fmt.Sprintf("%s_%d.pdf", stem, counter))
 		counter++
 	}
-	reserved[candidate] = true
+	reserved[strings.ToLower(candidate)] = true
 	return candidate
 }
 
@@ -131,10 +128,12 @@ func BatchSplit(inputs []string, outRoot string) ([]BatchResult, error) {
 		}
 		base := strings.TrimSuffix(filepath.Base(absIn), filepath.Ext(absIn))
 		candidate := filepath.Join(absOut, base+"_split")
-		for n := 2; reserved[candidate]; n++ {
+		key := strings.ToLower(candidate)
+		for n := 2; reserved[key]; n++ {
 			candidate = filepath.Join(absOut, fmt.Sprintf("%s_split_%d", base, n))
+			key = strings.ToLower(candidate)
 		}
-		reserved[candidate] = true
+		reserved[key] = true
 		dirs[i] = candidate
 	}
 

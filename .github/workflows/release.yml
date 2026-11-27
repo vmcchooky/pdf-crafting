@@ -29,7 +29,7 @@ jobs:
           GOOS: windows
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-        run: go build -ldflags="-s -w" -trimpath -o ../PDFCraft-windows-${{ matrix.goarch }}.exe ./cmd/pdfcraft
+        run: go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -trimpath -o ../PDFCraft-windows-${{ matrix.goarch }}.exe ./cmd/pdfcraft
       - uses: actions/upload-artifact@v4
         with:
           name: PDFCraft-windows-${{ matrix.goarch }}
@@ -50,4 +50,6 @@ jobs:
             PDFCraft-windows-amd64.exe
             PDFCraft-windows-arm64.exe
             SHA256SUMS.txt
+            HUONG-DAN.md
+            go/pkg/pdfcraft/fonts/OFL.txt
           generate_release_notes: true

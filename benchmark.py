@@ -88,7 +88,7 @@ def run_bench():
     print("\n[1] Thời gian khởi động và đọc thông tin (info):")
     # Python
     py_env = os.environ.copy()
-    py_env["PYTHONPATH"] = "python"
+    py_env["PYTHONPATH"] = "legacy/python"
 
     t0 = time.perf_counter()
     for _ in range(5):

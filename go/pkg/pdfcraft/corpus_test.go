@@ -43,7 +43,19 @@ func corruptStartXref(t *testing.T, src, dst string) {
 	if i < 0 {
 		t.Fatalf("startxref not found in %s", src)
 	}
-	copy(data[i+len(marker):], []byte("999999"))
+	start := i + len(marker)
+	end := start
+	for end < len(data) && data[end] >= '0' && data[end] <= '9' {
+		end++
+	}
+	if end == start {
+		t.Fatalf("startxref offset not found in %s", src)
+	}
+	// Chỉ đổi các chữ số của offset, giữ nguyên độ dài và %%EOF để fixture
+	// hỏng đúng một chỗ (xref) thay vì hỏng thêm trailer.
+	for k := start; k < end; k++ {
+		data[k] = '9'
+	}
 	if err := os.WriteFile(dst, data, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -209,24 +221,37 @@ func TestCorpusOperationsDoNotPanic(t *testing.T) {
 	for name, path := range map[string]string{"broken_xref": brokenXref, "truncated": truncated} {
 		t.Run(name, func(t *testing.T) {
 			out := t.TempDir()
-			// Không ràng buộc thành công/thất bại: pdfcpu có thể sửa xref.
-			// Yêu cầu duy nhất: không panic, mọi output tạo được phải hợp lệ.
-			if _, err := GetInfo(path); err == nil {
-				// đọc được là chấp nhận
+			qdir := qpdfOutDir(t)
+			// pdfcpu phải phục hồi được hai fixture này; nếu không, coverage
+			// sẽ âm thầm rỗng (mọi thao tác đều lỗi).
+			info, err := GetInfo(path)
+			if err != nil {
+				t.Fatalf("pdfcpu phải phục hồi được %s: %v", name, err)
+			}
+			if info.PageCount < 1 {
+				t.Fatalf("%s: page count = %d", name, info.PageCount)
 			}
 			ext := filepath.Join(out, "extract.pdf")
-			if err := ExtractPages(path, ext, []string{"1"}); err == nil {
-				requireValid(t, ext)
+			if err := ExtractPages(path, ext, []string{"1"}); err != nil {
+				t.Fatalf("extract %s: %v", name, err)
 			}
+			requireValid(t, ext)
 			comp := filepath.Join(out, "compress.pdf")
-			if err := CompressPdf(path, comp); err == nil {
-				requireValid(t, comp)
+			if err := CompressPdf(path, comp); err != nil {
+				t.Fatalf("compress %s: %v", name, err)
 			}
+			requireValid(t, comp)
+			exportForQPDF(t, comp, qdir)
 			splitDir := filepath.Join(out, "split")
-			if files, err := SplitAll(path, splitDir); err == nil {
-				for _, f := range files {
-					requireValid(t, f)
-				}
+			files, err := SplitAll(path, splitDir)
+			if err != nil {
+				t.Fatalf("split %s: %v", name, err)
+			}
+			if len(files) != info.PageCount {
+				t.Fatalf("split %s tạo %d file, want %d", name, len(files), info.PageCount)
+			}
+			for _, f := range files {
+				requireValid(t, f)
 			}
 		})
 	}

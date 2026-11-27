@@ -193,11 +193,8 @@ func ConvertOfficeToPdf(inputPaths []string, outDir, enginePath string, timeoutS
 					if _, err := os.Stat(produced_tmp); err != nil {
 						return fmt.Errorf("converter không tạo ra file: %s.pdf", stem)
 					}
-					if err := os.Rename(produced_tmp, wanted[src]); err != nil {
-						_ = os.Remove(wanted[src])
-						if err2 := os.Rename(produced_tmp, wanted[src]); err2 != nil {
-							return fmt.Errorf("không thể dời file kết quả: %w", err2)
-						}
+					if err := moveResultFile(produced_tmp, wanted[src]); err != nil {
+						return fmt.Errorf("không thể dời file kết quả: %w", err)
 					}
 					produced[src] = wanted[src]
 				}

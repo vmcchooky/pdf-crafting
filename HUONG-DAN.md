@@ -1,10 +1,10 @@
 # Hướng dẫn dùng PDF Craft (bản tặng)
 
-PDF Craft là công cụ xử lý PDF chạy thẳng trên Windows — **không cần cài đặt, không cần internet**, mọi thứ nằm trong đúng một tệp `PDFCraft.exe`.
+PDF Craft là công cụ xử lý PDF chạy thẳng trên Windows — **không cần cài đặt, không cần internet**, mọi thứ nằm trong đúng một tệp `.exe` (bản tải về tên `PDFCraft-windows-amd64.exe` hoặc `PDFCraft-windows-arm64.exe`; có thể đổi tên thành `PDFCraft.exe` cho gọn).
 
 ## Bắt đầu trong 30 giây
 
-1. Chép `PDFCraft.exe` vào bất cứ đâu trên máy (để ở Desktop là tiện nhất).
+1. Chép tệp `.exe` vào bất cứ đâu trên máy (để ở Desktop là tiện nhất; đổi tên thành `PDFCraft.exe` nếu muốn).
 2. **Nhấp đúp** vào tệp — giao diện sẽ tự mở trong trình duyệt.
 3. Kéo thả tệp PDF vào cửa sổ là bắt đầu dùng được: gộp, tách, xoay, sắp xếp trang, nén, đóng dấu...
 
@@ -28,7 +28,7 @@ Từ lần sau Windows không hỏi nữa. Tệp do chính người tặng đưa
 
 - Máy cần **Windows 10 trở lên**. Hầu hết máy dùng bản `amd64`; chỉ máy Windows chạy chip ARM (rất hiếm, ví dụ Surface Pro X) mới cần bản `arm64`.
 - Tính năng **chuyển Word/Excel sang PDF** dùng Microsoft Office có sẵn trên máy của bạn, hoặc LibreOffice (miễn phí) nếu không có MS Office — các tính năng PDF còn lại không cần gì thêm.
-- PDF Craft **không gửi dữ liệu đi đâu cả**: không tài khoản, không theo dõi, xử lý 100% trên máy của bạn. Tệp gốc luôn được giữ an toàn — chương trình ghi ra tệp mới rồi mới thay thế, không bao giờ ghi đè nửa chừng.
+- PDF Craft **không gửi dữ liệu đi đâu cả**: không tài khoản, không theo dõi, xử lý 100% trên máy của bạn. Chương trình ghi ra tệp tạm cùng thư mục rồi mới thay thế, nên lỗi giữa chừng không làm hỏng tệp đang có. **Lưu ý:** các lệnh `compress`, `rotate`, `meta`, `move`, `reorder` mặc định ghi đè lên tệp gốc — dùng `-o <tệp_mới>` nếu muốn giữ bản gốc.
 
 ## Gặp trục trặc?
 

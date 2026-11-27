@@ -26,7 +26,7 @@ jobs:
           test -z "$(gofmt -l .)"
           go build ./...
           go vet ./...
-          go test ./...
+          go test -race ./...
       - name: Cross-build Windows (amd64, arm64)
         working-directory: go
         env:
@@ -48,6 +48,13 @@ jobs:
         env:
           PDFCRAFT_QPDF_OUTDIR: ${{ runner.temp }}/qpdf-out
         run: go test ./pkg/pdfcraft -run TestCorpus -v
+      - name: Ensure corpus outputs were produced
+        run: |
+          set -euo pipefail
+          test -d "$RUNNER_TEMP/qpdf-out"
+          count=$(find "$RUNNER_TEMP/qpdf-out" -name '*.pdf' | wc -l)
+          echo "corpus PDFs: $count"
+          test "$count" -gt 0
       - name: qpdf --check generated outputs and examples
         run: |
           set -euo pipefail

@@ -118,6 +118,31 @@ func TestBatchCompressPartialFailure(t *testing.T) {
 	}
 }
 
+func TestBatchCompressOverwritesPreviousOutput(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "doc.pdf")
+	createValidTestPDF(t, input, 1)
+	outDir := filepath.Join(dir, "out")
+	if err := os.MkdirAll(outDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	previous := filepath.Join(outDir, "doc.pdf")
+	if err := os.WriteFile(previous, []byte("stale"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	results, err := BatchCompress([]string{input}, outDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if results[0].Err != nil {
+		t.Fatalf("batch compress: %v", results[0].Err)
+	}
+	if results[0].Output != previous {
+		t.Fatalf("output = %q, want %q (deterministic overwrite)", results[0].Output, previous)
+	}
+	requireValid(t, previous)
+}
+
 func TestBatchSplitCreatesFolders(t *testing.T) {
 	dir := t.TempDir()
 	a := filepath.Join(dir, "a.pdf")
