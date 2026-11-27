@@ -6,7 +6,7 @@
   <title>PDF Craft - Công cụ chỉnh sửa & sắp xếp trang PDF chuyên nghiệp</title>
   <meta name="description" content="Trình biên tập PDF trực quan, mượt mà: kéo thả đổi thứ tự trang, chèn trang từ tệp khác, xóa trang và trích xuất PDF tốc độ cao.">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="app.css?v=2.6">
+  <link rel="stylesheet" href="app.css?v=2.7">
   <style>
     .search-group { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--border-subtle); border-radius: 8px; }
     .search-group svg { color: var(--text-muted); flex-shrink: 0; }
@@ -17,6 +17,7 @@
   </style>
   <!-- Thư viện xử lý PDF nội bộ (100% Offline, Non-blocking Defer) -->
   <script src="vendor/pdf.min.js" defer></script>
+  <script src="vendor/fflate.umd.js" defer></script>
 </head>
 <body>
   <div class="app-layout">
@@ -261,13 +262,13 @@
               <span>Làm lại</span>
             </button>
 
-            <button class="btn btn-tool btn-primary" id="btnOpenSignStudio" title="Ký điện tử & Đóng dấu chữ ký / con dấu lên tài liệu">
+            <button class="btn btn-tool btn-primary" id="btnOpenSignStudio" title="Chèn chữ ký ảnh hoặc con dấu lên tài liệu">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
                 <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
                 <path d="M2 2l7.586 7.586"></path>
               </svg>
-              <span>Ký & Đóng dấu</span>
+              <span>Chữ ký ảnh & con dấu</span>
             </button>
           </div>
 
@@ -278,7 +279,7 @@
                 <circle cx="11" cy="11" r="8"></circle>
                 <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
               </svg>
-              <input type="text" id="searchInput" class="form-input form-input-sm" placeholder="Tìm trong PDF... ( / )" autocomplete="off">
+              <input type="text" id="searchInput" class="form-input form-input-sm" placeholder="Tìm trong PDF... ( / )" autocomplete="off" aria-label="Tìm nội dung trong PDF">
               <span id="searchCount" class="search-count"></span>
               <button type="button" class="btn btn-tool btn-sm btn-icon-only" id="btnSearchPrev" title="Kết quả trước (Shift+Enter)">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
@@ -443,7 +444,7 @@
                     <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
                   </svg>
                 </button>
-                <button type="button" class="card-action-btn" data-action="sign" title="Ký điện tử & đóng dấu trang này">
+                <button type="button" class="card-action-btn" data-action="sign" title="Chèn chữ ký ảnh hoặc con dấu lên trang này">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
                     <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
@@ -498,7 +499,7 @@
     </main>
 
     <!-- Fullscreen Preview Modal -->
-    <div class="modal" id="previewModal">
+    <div class="modal" id="previewModal" role="dialog" aria-modal="true" aria-label="Xem trước trang PDF" aria-hidden="true" inert>
       <div class="modal-backdrop" id="modalBackdrop"></div>
       <div class="modal-content">
         <div class="modal-header">
@@ -534,7 +535,7 @@
               </svg>
               <span>Ký trang này</span>
             </button>
-            <button class="modal-close" id="modalClose" title="Đóng (Esc)">
+            <button class="modal-close" id="modalClose" title="Đóng (Esc)" aria-label="Đóng xem trước">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="18" y1="6" x2="6" y2="18"></line>
                 <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -553,12 +554,12 @@
     </div>
 
     <!-- Create / Edit Group Modal -->
-    <div class="modal" id="groupModal">
+    <div class="modal" id="groupModal" role="dialog" aria-modal="true" aria-labelledby="groupModalTitle" aria-hidden="true" inert>
       <div class="modal-backdrop" id="groupModalBackdrop"></div>
       <div class="modal-content" style="max-width: 440px;">
         <div class="modal-header">
           <h3 id="groupModalTitle">Tạo nhóm mới</h3>
-          <button class="modal-close" id="groupModalClose">
+          <button class="modal-close" id="groupModalClose" aria-label="Đóng hộp thoại nhóm">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -568,7 +569,7 @@
         <div class="modal-body modal-dialog-body">
           <div class="form-group">
             <label class="form-label" for="inputGroupName">Tên nhóm:</label>
-            <input type="text" id="inputGroupName" class="form-input" placeholder="Ví dụ: Hợp đồng, Hóa đơn, CMND..." maxlength="35">
+            <input type="text" id="inputGroupName" class="form-input" placeholder="Ví dụ: Hợp đồng, Hóa đơn, CMND..." maxlength="35" data-dialog-initial-focus>
           </div>
           <div class="form-group">
             <label class="form-label">Màu đại diện:</label>
@@ -585,12 +586,12 @@
     </div>
 
     <!-- Assign Group to Selected Pages Modal -->
-    <div class="modal" id="assignGroupModal">
+    <div class="modal" id="assignGroupModal" role="dialog" aria-modal="true" aria-labelledby="assignGroupTitle" aria-hidden="true" inert>
       <div class="modal-backdrop" id="assignGroupBackdrop"></div>
       <div class="modal-content" style="max-width: 440px;">
         <div class="modal-header">
           <h3 id="assignGroupTitle">Gán nhóm cho trang đã chọn</h3>
-          <button class="modal-close" id="assignGroupClose">
+          <button class="modal-close" id="assignGroupClose" aria-label="Đóng hộp thoại gán nhóm">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -611,12 +612,12 @@
     </div>
 
     <!-- Move Entire Group Modal -->
-    <div class="modal" id="moveGroupModal">
+    <div class="modal" id="moveGroupModal" role="dialog" aria-modal="true" aria-labelledby="moveGroupTitle" aria-hidden="true" inert>
       <div class="modal-backdrop" id="moveGroupBackdrop"></div>
       <div class="modal-content" style="max-width: 460px;">
         <div class="modal-header">
           <h3 id="moveGroupTitle">Di chuyển nhóm trang</h3>
-          <button class="modal-close" id="moveGroupClose">
+          <button class="modal-close" id="moveGroupClose" aria-label="Đóng hộp thoại di chuyển nhóm">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -643,7 +644,7 @@
     </div>
 
     <!-- PDF Compression & Optimization Panel Modal -->
-    <div class="modal" id="compressModal">
+    <div class="modal" id="compressModal" role="dialog" aria-modal="true" aria-labelledby="compressModalTitle" aria-hidden="true" inert>
       <div class="modal-backdrop" id="compressModalBackdrop"></div>
       <div class="modal-content" style="max-width: 680px;">
         <div class="modal-header">
@@ -656,11 +657,11 @@
               </svg>
             </div>
             <div>
-              <h3 style="margin: 0; font-size: 1.12rem;">Bảng điều khiển Nén & Tối ưu hóa PDF</h3>
+              <h3 id="compressModalTitle" style="margin: 0; font-size: 1.12rem;">Bảng điều khiển Nén & Tối ưu hóa PDF</h3>
               <span style="font-size: 0.75rem; color: var(--text-muted);">Tối ưu dung lượng & chất lượng xuất file</span>
             </div>
           </div>
-          <button class="modal-close" id="compressModalClose" title="Đóng (Esc)">
+          <button class="modal-close" id="compressModalClose" title="Đóng (Esc)" aria-label="Đóng hộp thoại nén PDF">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -673,11 +674,11 @@
           <div class="compress-presets-bar">
             <span class="compress-presets-label">Cấu hình nhanh:</span>
             <div class="compress-presets-list">
-              <button type="button" class="btn btn-tool btn-sm active" id="presetBalanced" data-tooltip="DPI 150, Chất lượng 75%, giữ nguyên màu. Cân bằng tối ưu kích thước và độ nét.">
+              <button type="button" class="btn btn-tool btn-sm" id="presetBalanced" data-tooltip="DPI 150, Chất lượng 75%, giữ nguyên màu. Cân bằng tối ưu kích thước và độ nét.">
                 <span>⚖️ Cân bằng</span>
                 <span class="help-tip" data-tooltip="DPI 150, Chất lượng 75%, giữ nguyên màu. Cân bằng tối ưu kích thước và độ nét.">?</span>
               </button>
-              <button type="button" class="btn btn-tool btn-sm" id="presetMaxCompress" data-tooltip="DPI 96, Chất lượng 40%, thang xám. Dung lượng siêu nhỏ cho tệp nhẹ nhất.">
+              <button type="button" class="btn btn-tool btn-sm active" id="presetMaxCompress" data-tooltip="DPI 96, Chất lượng 40%, thang xám. Dung lượng siêu nhỏ cho tệp nhẹ nhất.">
                 <span>🚀 Nén tối đa</span>
                 <span class="help-tip" data-tooltip="DPI 96, Chất lượng 40%, thang xám. Dung lượng siêu nhỏ cho tệp nhẹ nhất.">?</span>
               </button>
@@ -698,15 +699,15 @@
                   <span class="help-tip" data-tooltip="DPI (Dots Per Inch) quyết định mật độ điểm ảnh của trang. 72-96 DPI phù hợp web/email; 150 DPI cân bằng tối ưu; 300 DPI cho in ấn sắc nét.">?</span>
                 </div>
               </div>
-              <span class="setting-val-badge" id="dpiDisplayValue">150 DPI</span>
+              <span class="setting-val-badge" id="dpiDisplayValue">96 DPI</span>
             </div>
 
             <div class="dpi-slider-wrapper">
-              <input type="range" id="dpiRange" min="72" max="300" step="1" value="150" class="compress-range-slider">
+              <input type="range" id="dpiRange" min="72" max="300" step="1" value="96" class="compress-range-slider">
               <div class="dpi-quick-btns">
                 <button type="button" class="dpi-btn" data-dpi="72">72 (Web)</button>
-                <button type="button" class="dpi-btn" data-dpi="96">96 (Văn phòng)</button>
-                <button type="button" class="dpi-btn active" data-dpi="150">150 (Khuyên dùng)</button>
+                <button type="button" class="dpi-btn active" data-dpi="96">96 (Văn phòng)</button>
+                <button type="button" class="dpi-btn" data-dpi="150">150 (Khuyên dùng)</button>
                 <button type="button" class="dpi-btn" data-dpi="200">200 (Nét)</button>
                 <button type="button" class="dpi-btn" data-dpi="300">300 (In ấn)</button>
               </div>
@@ -723,18 +724,20 @@
                   <span class="help-tip" data-tooltip="Mức nén ảnh JPEG: dưới 40% cho dung lượng siêu nhỏ; 70-85% cân bằng tối ưu; 90-100% giữ nguyên chất lượng ảnh gốc.">?</span>
                 </div>
               </div>
-              <span class="setting-val-badge" id="qualityDisplayValue">75%</span>
+              <span class="setting-val-badge" id="qualityDisplayValue">40%</span>
             </div>
 
             <div class="quality-slider-wrapper">
-              <input type="range" id="qualityRange" min="15" max="100" step="1" value="75" class="compress-range-slider">
+              <input type="range" id="qualityRange" min="15" max="100" step="1" value="40" class="compress-range-slider">
               <div class="range-labels">
                 <span>15% (Siêu nén)</span>
-                <span id="qualityStatusText" style="color: #a5b4fc; font-weight: 600;">75% (Cân bằng tối ưu)</span>
+                <span id="qualityStatusText" style="color: #38bdf8; font-weight: 600;">40% (Tiết kiệm dung lượng - Vừa phải)</span>
                 <span>100% (Gốc)</span>
               </div>
             </div>
           </div>
+
+          <div class="compress-impact-summary" id="compressImpactSummary" role="status" aria-live="polite" aria-atomic="true"></div>
 
           <!-- Advanced Options (Collapsible Details/Accordion) -->
           <details class="advanced-details" id="advancedCompressDetails">
@@ -781,7 +784,7 @@
               </label>
 
               <label class="adv-opt-label">
-                <input type="checkbox" id="optGrayscale" class="custom-checkbox">
+                <input type="checkbox" id="optGrayscale" class="custom-checkbox" checked>
                 <span>Chuyển sang thang xám</span>
                 <span class="help-tip" data-tooltip="Chuyển toàn bộ hình ảnh sang đen trắng / đơn sắc, loại bỏ 2 kênh màu giúp giảm thêm tới 30-40% dung lượng.">?</span>
               </label>
@@ -864,7 +867,7 @@
     </div>
 
     <!-- Digital Signature & Stamp Placement Studio Modal -->
-    <div class="modal modal-xl" id="signModal">
+    <div class="modal modal-xl" id="signModal" role="dialog" aria-modal="true" aria-labelledby="signModalTitle" aria-describedby="signVisualSignatureNote" aria-hidden="true" inert>
       <div class="modal-backdrop" id="signModalBackdrop"></div>
       <div class="modal-content sign-studio-content">
         <div class="modal-header">
@@ -876,11 +879,11 @@
                 <path d="M2 2l7.586 7.586"></path>
               </svg>
             </span>
-            <h3>Ký Điện Tử &amp; Đóng Dấu</h3>
+            <h3 id="signModalTitle">Chèn chữ ký ảnh &amp; đóng dấu</h3>
             <span class="sign-doc-info" id="signDocInfo"></span>
           </div>
           <div class="modal-header-actions">
-            <button class="modal-close" id="signModalClose" title="Đóng (Esc)">
+            <button class="modal-close" id="signModalClose" title="Đóng (Esc)" aria-label="Đóng công cụ chữ ký và con dấu">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="18" y1="6" x2="6" y2="18"></line>
                 <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -889,10 +892,12 @@
           </div>
         </div>
 
+        <p class="sign-visual-signature-note" id="signVisualSignatureNote">Chữ ký và con dấu ở đây là hình ảnh chèn vào PDF, không phải chữ ký số có chứng thư để xác thực.</p>
+
         <div class="sign-studio-body">
           <!-- Vertical tool rail -->
           <div class="sign-rail" role="tablist" aria-label="Công cụ ký đóng dấu">
-            <button type="button" class="sign-rail-btn active" data-tab="upload" id="tabUpload" role="tab" aria-selected="true" title="Tải ảnh và quản lý thư viện con dấu">
+            <button type="button" class="sign-rail-btn active" data-tab="upload" id="tabUpload" role="tab" aria-selected="true" aria-controls="paneUpload" tabindex="0" title="Tải ảnh và quản lý thư viện con dấu">
               <span class="sign-rail-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -902,7 +907,7 @@
               </span>
               <span class="sign-rail-label">Thư viện</span>
             </button>
-            <button type="button" class="sign-rail-btn" data-tab="type" id="tabType" role="tab" aria-selected="false" title="Gõ tên tạo chữ ký viết tay nghệ thuật">
+            <button type="button" class="sign-rail-btn" data-tab="type" id="tabType" role="tab" aria-selected="false" aria-controls="paneType" tabindex="-1" title="Gõ tên tạo chữ ký viết tay nghệ thuật">
               <span class="sign-rail-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="4 7 4 4 20 4 20 7"></polyline>
@@ -912,7 +917,7 @@
               </span>
               <span class="sign-rail-label">Gõ chữ ký</span>
             </button>
-            <button type="button" class="sign-rail-btn" data-tab="official" id="tabOfficial" role="tab" aria-selected="false" title="Tạo con dấu tên, chức danh và nghiệp vụ chuẩn Việt Nam">
+            <button type="button" class="sign-rail-btn" data-tab="official" id="tabOfficial" role="tab" aria-selected="false" aria-controls="paneOfficial" tabindex="-1" title="Tạo con dấu tên, chức danh và nghiệp vụ chuẩn Việt Nam">
               <span class="sign-rail-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="3" y="4" width="18" height="16" rx="2"></rect>
@@ -929,7 +934,7 @@
           <div class="sign-panel">
             <div class="sign-panel-scroll">
               <!-- Pane: Thư viện ảnh -->
-              <div class="sign-tab-content active" id="paneUpload">
+              <div class="sign-tab-content active" id="paneUpload" role="tabpanel" aria-labelledby="tabUpload" tabindex="0">
                 <div class="sign-section">
                   <div class="sign-section-title">Tải ảnh con dấu / chữ ký</div>
                   <div class="sign-upload-zone" id="signUploadDrop">
@@ -963,7 +968,7 @@
               </div>
 
               <!-- Pane: Gõ chữ ký -->
-              <div class="sign-tab-content" id="paneType" style="display: none;">
+              <div class="sign-tab-content" id="paneType" role="tabpanel" aria-labelledby="tabType" tabindex="0" style="display: none;">
                 <div class="sign-section">
                   <div class="sign-section-title">Xem trước chữ ký</div>
                   <div class="sign-type-live-preview" id="signTypeLivePreview">
@@ -1014,7 +1019,7 @@
               </div>
 
               <!-- Pane: Dấu chức danh / nghiệp vụ -->
-              <div class="sign-tab-content" id="paneOfficial" style="display: none;">
+              <div class="sign-tab-content" id="paneOfficial" role="tabpanel" aria-labelledby="tabOfficial" tabindex="0" style="display: none;">
                 <div class="sign-section official-preview-section">
                   <div class="sign-section-title-row">
                     <span class="sign-section-title">Xem trước con dấu</span>
@@ -1264,12 +1269,12 @@
     </div>
 
     <!-- Document Metadata Editor Modal -->
-    <div class="modal" id="metaModal">
+    <div class="modal" id="metaModal" role="dialog" aria-modal="true" aria-labelledby="metaModalTitle" aria-hidden="true" inert>
       <div class="modal-backdrop" id="metaModalBackdrop"></div>
       <div class="modal-content" style="max-width: 460px;">
         <div class="modal-header">
-          <h3>Metadata tài liệu (áp dụng khi xuất file)</h3>
-          <button class="modal-close" id="metaModalClose">
+          <h3 id="metaModalTitle">Metadata tài liệu (áp dụng khi xuất file)</h3>
+          <button class="modal-close" id="metaModalClose" aria-label="Đóng hộp thoại metadata">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -1280,7 +1285,7 @@
           <p class="dialog-subtext">Để trống trường nào thì giữ nguyên giá trị gốc của trường đó.</p>
           <div class="form-group" style="margin-bottom: 8px;">
             <label class="form-label" for="inputMetaTitle">Tiêu đề (Title):</label>
-            <input type="text" id="inputMetaTitle" class="form-input" placeholder="Ví dụ: Báo cáo Q3 2026" maxlength="200">
+            <input type="text" id="inputMetaTitle" class="form-input" placeholder="Ví dụ: Báo cáo Q3 2026" maxlength="200" data-dialog-initial-focus>
           </div>
           <div class="form-group" style="margin-bottom: 8px;">
             <label class="form-label" for="inputMetaAuthor">Tác giả (Author):</label>
@@ -1307,12 +1312,12 @@
     </div>
 
     <!-- Encrypted PDF Password Prompt -->
-    <div class="modal" id="passwordModal">
+    <div class="modal" id="passwordModal" role="dialog" aria-modal="true" aria-labelledby="passwordModalTitle" aria-hidden="true" inert>
       <div class="modal-backdrop" id="passwordModalBackdrop"></div>
       <div class="modal-content" style="max-width: 420px;">
         <div class="modal-header">
-          <h3>File PDF được mã hóa</h3>
-          <button class="modal-close" id="passwordModalClose">
+          <h3 id="passwordModalTitle">File PDF được mã hóa</h3>
+          <button class="modal-close" id="passwordModalClose" aria-label="Đóng hộp thoại mật khẩu">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -1324,7 +1329,7 @@
           <p class="dialog-subtext" id="passwordError" style="display: none; color: #f87171;">Mật khẩu chưa đúng, vui lòng thử lại.</p>
           <div class="form-group" style="margin-bottom: 8px;">
             <label class="form-label" for="passwordInput">Mật khẩu:</label>
-            <input type="password" id="passwordInput" class="form-input" placeholder="Nhập mật khẩu file PDF" autocomplete="off">
+            <input type="password" id="passwordInput" class="form-input" placeholder="Nhập mật khẩu file PDF" autocomplete="off" data-dialog-initial-focus>
           </div>
           <div class="dialog-actions">
             <button class="btn btn-tool" id="btnCancelPasswordModal">Bỏ qua file</button>
@@ -1335,12 +1340,12 @@
     </div>
 
     <!-- Document Outline (Bookmarks) Viewer Modal -->
-    <div class="modal" id="outlineModal">
+    <div class="modal" id="outlineModal" role="dialog" aria-modal="true" aria-labelledby="outlineModalTitle" aria-hidden="true" inert>
       <div class="modal-backdrop" id="outlineModalBackdrop"></div>
       <div class="modal-content" style="max-width: 460px;">
         <div class="modal-header">
-          <h3>Mục lục tài liệu</h3>
-          <button class="modal-close" id="outlineModalClose">
+          <h3 id="outlineModalTitle">Mục lục tài liệu</h3>
+          <button class="modal-close" id="outlineModalClose" aria-label="Đóng hộp thoại mục lục">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -1358,10 +1363,10 @@
     </div>
 
     <!-- Toast Notification -->
-    <div class="toast" id="toast"></div>
+    <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   </div>
 
-  <script src="utils.js?v=2.4" defer></script>
-  <script src="app.js?v=2.6" defer></script>
+  <script src="utils.js?v=2.5" defer></script>
+  <script src="app.js?v=2.7" defer></script>
 </body>
 </html>

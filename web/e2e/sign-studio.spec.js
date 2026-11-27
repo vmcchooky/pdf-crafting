@@ -26,6 +26,9 @@ test.describe('Sign Studio redesign', () => {
     // Switch to type tab
     await page.locator('#tabType').click();
     await expect(page.locator('#tabType')).toHaveClass(/active/);
+    await expect(page.locator('#tabType')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#tabType')).toHaveAttribute('tabindex', '0');
+    await expect(page.locator('#tabUpload')).toHaveAttribute('tabindex', '-1');
     await expect(page.locator('#paneType')).toBeVisible();
     await expect(page.locator('#paneUpload')).toBeHidden();
 

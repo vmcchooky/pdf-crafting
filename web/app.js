@@ -74,9 +74,6 @@ const historyStack = [];
 const redoStack = [];
 const MAX_HISTORY = 20;
 let lastSelectedPageIndex = null;
-// Kéo thả live-gap: DOM đã được sắp lại trong lúc dragover chưa commit vào state.pages
-let dragLiveActive = false;
-let dragDidDrop = false;
 let dragPageIds = [];
 
 // Thumbnail image render cache (ImageBitmap / Canvas) sử dụng Bounded LRU Cache để giới hạn VRAM và tự thu hồi bitmap.close()
@@ -265,6 +262,7 @@ const dpiQuickBtns = document.querySelectorAll('.dpi-btn');
 const qualityRange = document.getElementById('qualityRange');
 const qualityDisplayValue = document.getElementById('qualityDisplayValue');
 const qualityStatusText = document.getElementById('qualityStatusText');
+const compressImpactSummary = document.getElementById('compressImpactSummary');
 const compressProgressBox = document.getElementById('compressProgressBox');
 const compressProgressText = document.getElementById('compressProgressText');
 const compressProgressPercent = document.getElementById('compressProgressPercent');
@@ -582,6 +580,7 @@ const btnSaveSignDone = document.getElementById('btnSaveSignDone');
 // ==========================================================================
 
 function init() {
+  setupAccessibleModals();
   setupUploadEvents();
   setupToolbarEvents();
   setupPagesGridDelegation();
@@ -590,9 +589,9 @@ function init() {
   setupCompressEvents();
   setupSignatureEvents();
   setupMetaEvents();
-setupPasswordEvents();
-setupOutlineEvents();
-setupConvertEvents();
+  setupPasswordEvents();
+  setupOutlineEvents();
+  setupConvertEvents();
   setupSearchEvents();
   setupProjectEvents();
   initColorPicker();
@@ -600,6 +599,101 @@ setupConvertEvents();
   checkContextMenuStatus();
   checkInitialFile();
   setupMarqueeSelection();
+}
+
+function setupAccessibleModals() {
+  const dialogs = Array.from(document.querySelectorAll('.modal[role="dialog"]'));
+  if (dialogs.length === 0) return;
+
+  const restoreTargets = new WeakMap();
+  let activeDialog = null;
+  dialogs.forEach(dialog => { dialog.tabIndex = -1; });
+
+  const visibleFocusables = (dialog) => Array.from(dialog.querySelectorAll(
+    'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )).filter(el => !el.closest('[hidden]') && el.getClientRects().length > 0);
+
+  const focusInitialControl = (dialog) => {
+    const target = dialog.querySelector('[data-dialog-initial-focus], [autofocus]') || visibleFocusables(dialog)[0] || dialog;
+    target.focus({ preventScroll: true });
+  };
+
+  const syncActiveDialog = () => {
+    const next = [...dialogs].reverse().find(dialog => dialog.classList.contains('active')) || null;
+    if (next === activeDialog) return;
+    const previousDialog = activeDialog;
+    const currentFocus = document.activeElement;
+
+    if (previousDialog) {
+      previousDialog.setAttribute('aria-hidden', 'true');
+      previousDialog.inert = true;
+    }
+
+    if (next) {
+      let focusTarget = null;
+      if (!previousDialog || previousDialog.classList.contains('active')) {
+        // Opening a dialog, including a nested dialog: remember the exact opener.
+        restoreTargets.set(next, currentFocus);
+      } else {
+        // The previous dialog closed and exposed the dialog beneath it.
+        focusTarget = restoreTargets.get(previousDialog);
+      }
+      next.inert = false;
+      next.setAttribute('aria-hidden', 'false');
+      activeDialog = next;
+      requestAnimationFrame(() => {
+        if (activeDialog !== next) return;
+        if (focusTarget && focusTarget.isConnected && next.contains(focusTarget)) {
+          focusTarget.focus({ preventScroll: true });
+        } else {
+          focusInitialControl(next);
+        }
+      });
+      return;
+    }
+
+    activeDialog = null;
+    if (previousDialog) {
+      const returnTarget = restoreTargets.get(previousDialog);
+      if (returnTarget && returnTarget.isConnected && !returnTarget.closest('.modal[aria-hidden="true"]')) {
+        requestAnimationFrame(() => returnTarget.focus({ preventScroll: true }));
+      }
+    }
+  };
+
+  const observer = new MutationObserver(syncActiveDialog);
+  dialogs.forEach(dialog => observer.observe(dialog, { attributes: true, attributeFilter: ['class'] }));
+
+  document.addEventListener('keydown', (event) => {
+    if (!activeDialog) return;
+    if (event.key === 'Escape') {
+      if (activeDialog === compressModal && btnExecuteCompress && btnExecuteCompress.disabled) return;
+      const closeButton = activeDialog.querySelector('.modal-close');
+      if (closeButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeButton.click();
+      }
+      return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const focusables = visibleFocusables(activeDialog);
+    if (focusables.length === 0) {
+      event.preventDefault();
+      activeDialog.focus();
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (event.shiftKey && (document.activeElement === first || !activeDialog.contains(document.activeElement))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (document.activeElement === last || !activeDialog.contains(document.activeElement))) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
 }
 
 // Check and load initial file from native backend (e.g. opened via Windows Context Menu or CLI)
@@ -873,6 +967,49 @@ function applyDocMeta(outPdf) {
   }
 }
 
+async function applySourceDocMeta(outPdf, pagesToExport) {
+  const firstPage = (pagesToExport || []).find(item => item && state.sources.has(item.sourceId));
+  const srcObj = firstPage ? state.sources.get(firstPage.sourceId) : null;
+  if (!srcObj) return;
+  try {
+    const sourceMetadata = srcObj.pdfJsDoc && typeof srcObj.pdfJsDoc.getMetadata === 'function'
+      ? await srcObj.pdfJsDoc.getMetadata()
+      : null;
+    const info = sourceMetadata && sourceMetadata.info ? sourceMetadata.info : {};
+    const sourcePdf = sourceMetadata ? null : await getSourcePdfLibDoc(srcObj);
+    const setText = (field, value) => {
+      if (typeof value === 'string' && value.trim()) outPdf[field](value.trim());
+    };
+
+    setText('setTitle', info.Title || (sourcePdf && sourcePdf.getTitle()));
+    setText('setAuthor', info.Author || (sourcePdf && sourcePdf.getAuthor()));
+    setText('setSubject', info.Subject || (sourcePdf && sourcePdf.getSubject()));
+    const keywordValue = info.Keywords || (sourcePdf && sourcePdf.getKeywords());
+    if (keywordValue && (Array.isArray(keywordValue) ? keywordValue.length : String(keywordValue).trim())) {
+      outPdf.setKeywords(Array.isArray(keywordValue)
+        ? keywordValue
+        : String(keywordValue).split(/[,;\n]+/).map(s => s.trim()).filter(Boolean));
+    }
+    setText('setCreator', info.Creator || (sourcePdf && sourcePdf.getCreator()));
+    setText('setProducer', info.Producer || (sourcePdf && sourcePdf.getProducer()));
+
+    const parseDate = value => {
+      const parser = window.pdfjsLib && window.pdfjsLib.PDFDateString;
+      if (typeof value === 'string' && parser && typeof parser.toDateObject === 'function') {
+        const date = parser.toDateObject(value);
+        return date instanceof Date && Number.isFinite(date.getTime()) ? date : null;
+      }
+      return value instanceof Date && Number.isFinite(value.getTime()) ? value : null;
+    };
+    const creationDate = parseDate(info.CreationDate) || (sourcePdf && sourcePdf.getCreationDate());
+    const modificationDate = parseDate(info.ModDate) || (sourcePdf && sourcePdf.getModificationDate());
+    if (creationDate instanceof Date && Number.isFinite(creationDate.getTime())) outPdf.setCreationDate(creationDate);
+    if (modificationDate instanceof Date && Number.isFinite(modificationDate.getTime())) outPdf.setModificationDate(modificationDate);
+  } catch (e) {
+    console.warn('Không đọc được metadata gốc:', e);
+  }
+}
+
 function setupMetaEvents() {
   if (!btnMetaEdit || !metaModal) return;
 
@@ -885,7 +1022,8 @@ function setupMetaEvents() {
     // Điền sẵn từ file nguồn đầu tiên (nếu có) để người dùng sửa tiếp
     try {
       await ensurePdfLibLoaded();
-      const firstSrc = state.sources.values().next().value;
+      const firstPage = state.pages.find(item => state.sources.has(item.sourceId));
+      const firstSrc = firstPage ? state.sources.get(firstPage.sourceId) : null;
       if (firstSrc) {
         const d = await getSourcePdfLibDoc(firstSrc);
         if (d) {
@@ -1700,20 +1838,26 @@ function setupToolbarEvents() {
     });
   }
 
-  // Split all pages with custom page titles
+  // Split all pages into one ZIP so browsers only need to accept one download.
   btnSplitAll.addEventListener('click', async () => {
-    if (state.pages.length > 20) {
-      if (!confirm(`Tài liệu có ${state.pages.length} trang. Bạn có muốn tải về từng file một không?`)) {
-        return;
+    const entries = Object.create(null);
+    try {
+      for (let i = 0; i < state.pages.length; i++) {
+        const p = state.pages[i];
+        showToast(`Đang chuẩn bị ZIP: trang ${i + 1}/${state.pages.length}...`, 'success');
+        let bytes = await createPdfBytesFromPages([p]);
+        bytes = await finalizePdfBytesWithBookmarks(bytes, [p]);
+        const title = sanitizeArchiveName(p.title || `trang_${i + 1}`);
+        entries[`${String(i + 1).padStart(3, '0')}_${title}.pdf`] = bytes;
       }
+      const archiveName = getArchiveName(state.pages, 'split');
+      const zipBytes = await createZipBytes(entries);
+      downloadBlob(zipBytes, archiveName, 'application/zip');
+      showToast(`Đã tải ZIP gồm ${state.pages.length} tệp PDF!`, 'success');
+    } catch (err) {
+      console.error('Lỗi khi tách PDF:', err);
+      showToast('Không thể đóng gói PDF: ' + err.message, 'danger');
     }
-    showToast('Đang tiến hành tách các trang theo tên...', 'success');
-    for (let i = 0; i < state.pages.length; i++) {
-      const p = state.pages[i];
-      const safeName = (p.title || `trang_${i + 1}`).replace(/[\\/:*?"<>|]/g, '_');
-      await exportPdfFromPages([p], `${safeName}.pdf`, false);
-    }
-    showToast(`Đã tách thành công ${state.pages.length} tệp PDF!`, 'success');
   });
 
   // Export by Groups
@@ -1723,22 +1867,32 @@ function setupToolbarEvents() {
       return;
     }
 
+    const entries = Object.create(null);
     let exportedCount = 0;
-    showToast('Đang xuất các tệp PDF theo từng nhóm...', 'success');
-
-    for (const group of state.groups) {
-      const groupPages = state.pages.filter(p => p.groupIds && p.groupIds.includes(group.id));
-      if (groupPages.length > 0) {
-        const safeName = group.name.replace(/[\\/:*?"<>|]/g, '_');
-        await exportPdfFromPages(groupPages, `${safeName}.pdf`, false);
-        exportedCount++;
+    try {
+      for (let i = 0; i < state.groups.length; i++) {
+        const group = state.groups[i];
+        const groupPages = state.pages.filter(p => p.groupIds && p.groupIds.includes(group.id));
+        if (groupPages.length > 0) {
+          showToast(`Đang chuẩn bị ZIP: nhóm ${exportedCount + 1}...`, 'success');
+          let bytes = await createPdfBytesFromPages(groupPages);
+          bytes = await finalizePdfBytesWithBookmarks(bytes, groupPages);
+          const safeName = sanitizeArchiveName(group.name || `nhom_${i + 1}`);
+          entries[`${String(i + 1).padStart(2, '0')}_${safeName}.pdf`] = bytes;
+          exportedCount++;
+        }
       }
-    }
 
-    if (exportedCount > 0) {
-      showToast(`Đã xuất thành công ${exportedCount} tệp PDF theo nhóm!`, 'success');
-    } else {
-      showToast('Các nhóm hiện tại chưa có trang nào được gán!', 'danger');
+      if (exportedCount === 0) {
+        showToast('Các nhóm hiện tại chưa có trang nào được gán!', 'danger');
+        return;
+      }
+      const zipBytes = await createZipBytes(entries);
+      downloadBlob(zipBytes, 'pdfcraft_groups.zip', 'application/zip');
+      showToast(`Đã tải ZIP gồm ${exportedCount} nhóm PDF!`, 'success');
+    } catch (err) {
+      console.error('Lỗi khi xuất PDF theo nhóm:', err);
+      showToast('Không thể đóng gói nhóm PDF: ' + err.message, 'danger');
     }
   });
 
@@ -2759,9 +2913,11 @@ function setupPagesGridDelegation() {
     }
   });
 
-  // Kéo-thả sắp xếp trang bằng Event Delegation: 6 listener duy nhất cho cả lưới,
-  // thay vì 6 listener/card (500 trang = 3000 listener). Hành vi giữ nguyên bản per-card.
+  // Kéo-thả sắp xếp trang bằng Event Delegation: 4 listener duy nhất cho cả lưới,
+  // thay vì gắn listener riêng cho từng thẻ.
   const resolveDragCard = (e) => (e.target && e.target.closest ? e.target.closest('.page-card') : null);
+  const dragMarkerClasses = ['drag-over-left', 'drag-over-right', 'drag-over-top', 'drag-over-bottom'];
+  let dragOverCard = null;
 
   function reindexGridCards(updateTitles) {
     const allCards = pagesGrid.querySelectorAll('.page-card');
@@ -2781,49 +2937,83 @@ function setupPagesGridDelegation() {
     }
   }
 
-  function getDraggingCards() {
-    if (dragPageIds.length) {
-      return dragPageIds
-        .map(id => pagesGrid.querySelector(`.page-card[data-page-id="${id}"]`))
-        .filter(Boolean);
-    }
-    return Array.from(pagesGrid.querySelectorAll('.page-card.dragging'));
+  function clearDropMarker() {
+    if (dragOverCard) dragOverCard.classList.remove(...dragMarkerClasses);
+    dragOverCard = null;
   }
 
-  function isDragBlockPlaced(targetCard, placeBefore) {
-    const cards = getDraggingCards();
-    if (!cards.length) return false;
-    if (placeBefore) {
-      let node = targetCard.previousElementSibling;
-      for (let i = cards.length - 1; i >= 0; i--) {
-        if (node !== cards[i]) return false;
-        node = node.previousElementSibling;
+  function getDropPosition(card, clientX, clientY) {
+    const rect = card.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const deltaX = clientX - centerX;
+    const deltaY = clientY - centerY;
+    if (Math.abs(deltaX) >= Math.abs(deltaY)) {
+      return { before: deltaX < 0, markerClass: deltaX < 0 ? 'drag-over-left' : 'drag-over-right' };
+    }
+    return { before: deltaY < 0, markerClass: deltaY < 0 ? 'drag-over-top' : 'drag-over-bottom' };
+  }
+
+  function setDropMarker(card, markerClass) {
+    if (!card) {
+      clearDropMarker();
+      return;
+    }
+    if (dragOverCard === card && card.classList.contains(markerClass)) return;
+    clearDropMarker();
+    card.classList.add(markerClass);
+    dragOverCard = card;
+  }
+
+  function findNearestDropTarget(clientX, clientY) {
+    const movingIds = new Set(dragPageIds);
+    let nearestCard = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    pagesGrid.querySelectorAll('.page-card').forEach(card => {
+      if (card.style.display === 'none' || movingIds.has(card.dataset.pageId)) return;
+      const rect = card.getBoundingClientRect();
+      const dx = clientX < rect.left ? rect.left - clientX : clientX > rect.right ? clientX - rect.right : 0;
+      const dy = clientY < rect.top ? rect.top - clientY : clientY > rect.bottom ? clientY - rect.bottom : 0;
+      const distance = dx * dx + dy * dy;
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestCard = card;
       }
-      return true;
-    }
-    let node = targetCard.nextElementSibling;
-    for (let i = 0; i < cards.length; i++) {
-      if (node !== cards[i]) return false;
-      node = node.nextElementSibling;
-    }
-    return true;
+    });
+    if (!nearestCard) return null;
+    return { card: nearestCard, ...getDropPosition(nearestCard, clientX, clientY) };
   }
 
-  // Live gap: dời ngay khối đang kéo tới vị trí hover — trang khác tự né, hiện khoảng trống thật
-  function applyLiveDragGap(targetCard, placeBefore) {
-    if (!targetCard || targetCard.classList.contains('dragging')) return false;
-    if (isDragBlockPlaced(targetCard, placeBefore)) return false;
-    const cards = getDraggingCards();
-    if (!cards.length) return false;
-    const frag = document.createDocumentFragment();
-    cards.forEach(c => frag.appendChild(c));
-    if (placeBefore) {
-      targetCard.before(frag);
-    } else {
-      targetCard.after(frag);
+  function commitDraggedPages(targetPageId, placeBefore) {
+    const movingIds = new Set(dragPageIds);
+    const movingPages = state.pages.filter(page => movingIds.has(page.id));
+    const targetPage = state.pages.find(page => page.id === targetPageId);
+    if (!movingPages.length || movingPages.length !== movingIds.size || !targetPage || movingIds.has(targetPage.id)) {
+      return false;
     }
-    reindexGridCards(false);
-    dragLiveActive = true;
+
+    const remainingPages = state.pages.filter(page => !movingIds.has(page.id));
+    const targetIndex = remainingPages.indexOf(targetPage);
+    if (targetIndex < 0) return false;
+    const insertionIndex = targetIndex + (placeBefore ? 0 : 1);
+    const newOrder = remainingPages.slice();
+    newOrder.splice(insertionIndex, 0, ...movingPages);
+    if (newOrder.every((page, index) => page.id === state.pages[index].id)) return false;
+
+    saveHistoryState();
+    state.pages = newOrder;
+
+    const cardsById = new Map();
+    pagesGrid.querySelectorAll('.page-card').forEach(card => cardsById.set(card.dataset.pageId, card));
+    if (newOrder.some(page => !cardsById.has(page.id))) {
+      renderGrid();
+    } else {
+      const fragment = document.createDocumentFragment();
+      newOrder.forEach(page => fragment.appendChild(cardsById.get(page.id)));
+      pagesGrid.appendChild(fragment);
+      reindexGridCards(true);
+    }
+    updateSelectionUI();
     return true;
   }
 
@@ -2839,47 +3029,11 @@ function setupPagesGridDelegation() {
     });
   }
 
-  function commitOrderFromDom() {
-    const byId = new Map(state.pages.map(p => [p.id, p]));
-    const newOrder = [];
-    pagesGrid.querySelectorAll('.page-card').forEach(c => {
-      const p = byId.get(c.dataset.pageId);
-      if (p) newOrder.push(p);
-    });
-    if (newOrder.length !== state.pages.length) return false;
-    const changed = newOrder.some((p, i) => p.id !== state.pages[i].id);
-    if (!changed) return false;
-    saveHistoryState();
-    state.pages = newOrder;
-    reindexGridCards(true);
-    updateSelectionUI();
-    return true;
-  }
-
-  function restoreGridDomFromState() {
-    const byId = new Map();
-    pagesGrid.querySelectorAll('.page-card').forEach(c => byId.set(c.dataset.pageId, c));
-    const frag = document.createDocumentFragment();
-    let missing = false;
-    state.pages.forEach(p => {
-      const c = byId.get(p.id);
-      if (c) frag.appendChild(c);
-      else missing = true;
-    });
-    if (missing) {
-      renderGrid();
-      return;
-    }
-    pagesGrid.appendChild(frag);
-    reindexGridCards(false);
-  }
-
   pagesGrid.addEventListener('dragstart', (e) => {
     const card = resolveDragCard(e);
     if (!card) return;
     isUserInteracting = true;
-    dragLiveActive = false;
-    dragDidDrop = false;
+    clearDropMarker();
     dragPageIds = [];
     const idx = parseInt(card.dataset.index, 10);
     const draggedPage = state.pages[idx];
@@ -2921,15 +3075,11 @@ function setupPagesGridDelegation() {
   });
 
   pagesGrid.addEventListener('dragend', () => {
-    pagesGrid.querySelectorAll('.page-card.dragging, .page-card.drag-over-left, .page-card.drag-over-right').forEach(c => {
-      c.classList.remove('dragging', 'drag-over-left', 'drag-over-right');
+    pagesGrid.querySelectorAll('.page-card').forEach(c => {
+      c.classList.remove('dragging', ...dragMarkerClasses);
     });
     pagesGrid.classList.remove('dragging-active');
-    if (dragLiveActive && !dragDidDrop) {
-      restoreGridDomFromState();
-    }
-    dragLiveActive = false;
-    dragDidDrop = false;
+    clearDropMarker();
     dragPageIds = [];
     state.draggedIndex = null;
     state.isMultiDragging = false;
@@ -2939,138 +3089,49 @@ function setupPagesGridDelegation() {
     }, 150);
   });
 
-  pagesGrid.addEventListener('dragenter', (e) => {
-    const card = resolveDragCard(e);
-    if (!card) return;
-    // Đệm điểm giữa thẻ để dragover không phải gọi getBoundingClientRect() liên tục
-    const rect = card.getBoundingClientRect();
-    card._dragMidX = rect.left + rect.width / 2;
-  });
-
   pagesGrid.addEventListener('dragover', (e) => {
-    const card = resolveDragCard(e);
-    if (!card) return;
+    if (state.draggedIndex === null) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
 
-    if (card.classList.contains('dragging')) {
-      card.classList.remove('drag-over-left', 'drag-over-right');
-      return;
-    }
-    if (state.draggedIndex === null) return;
-
-    // Lookup theo pageId — sau live-reindex, dataset.index đã khớp DOM nhưng state.pages chưa commit
-    const targetPage = state.pages.find(p => p.id === card.dataset.pageId);
-    if (state.isMultiDragging && card.classList.contains('selected')) {
-      card.classList.remove('drag-over-left', 'drag-over-right');
-      return;
-    }
-
-    // So sánh toạ độ chuột với điểm giữa thẻ đã lưu đệm từ dragenter, KHÔNG gọi getBoundingClientRect() lặp lại
-    const isLeftHalf = card._dragMidX > 0 ? (e.clientX < card._dragMidX) : (e.offsetX < card.offsetWidth / 2);
-
-    // Live gap: trang khác né ra, khoảng trống xuất hiện tại điểm thả (trước/sau thẻ hover)
-    applyLiveDragGap(card, isLeftHalf);
-
-    if (isLeftHalf) {
-      if (!card.classList.contains('drag-over-left')) {
-        card.classList.add('drag-over-left');
-        card.classList.remove('drag-over-right');
-      }
-    } else {
-      if (!card.classList.contains('drag-over-right')) {
-        card.classList.add('drag-over-right');
-        card.classList.remove('drag-over-left');
-      }
-    }
-  });
-
-  pagesGrid.addEventListener('dragleave', (e) => {
     const card = resolveDragCard(e);
-    if (!card) return;
-    card.classList.remove('drag-over-left', 'drag-over-right');
+    if (card && card.classList.contains('dragging')) {
+      clearDropMarker();
+      return;
+    }
+    if (card && state.isMultiDragging && card.classList.contains('selected')) {
+      clearDropMarker();
+      return;
+    }
+
+    const position = card
+      ? { card, ...getDropPosition(card, e.clientX, e.clientY) }
+      : findNearestDropTarget(e.clientX, e.clientY);
+    if (!position) {
+      clearDropMarker();
+      return;
+    }
+    setDropMarker(position.card, position.markerClass);
   });
 
   pagesGrid.addEventListener('drop', (e) => {
-    const card = resolveDragCard(e);
-    if (!card) return;
+    if (state.draggedIndex === null) return;
     e.preventDefault();
-    card.classList.remove('drag-over-left', 'drag-over-right');
-
-    if (card.classList.contains('dragging')) return;
-
-    const targetPage = state.pages.find(p => p.id === card.dataset.pageId);
-    if (!targetPage && !dragLiveActive) return;
-
-    const isLeftHalf = card._dragMidX > 0 ? (e.clientX < card._dragMidX) : (e.offsetX < card.offsetWidth / 2);
-    const movedIds = dragPageIds.slice();
-
-    // Ưu tiên commit thứ tự DOM nếu dragover đã live-gap (kéo thả kiểu “né ra”)
-    if (dragLiveActive) {
-      if (state.isMultiDragging && card.classList.contains('selected')) return; // drop lên chính khối đang kéo — hủy, dragend sẽ khôi phục DOM
-      dragDidDrop = true;
-      const ok = commitOrderFromDom();
-      if (ok) {
-        flashMovedCards(movedIds);
-        showToast(`Đã di chuyển ${movedIds.length || 1} trang tới vị trí mới!`, 'success');
-      }
+    const card = resolveDragCard(e);
+    if (card && (card.classList.contains('dragging') || (state.isMultiDragging && card.classList.contains('selected')))) {
+      clearDropMarker();
       return;
     }
+    const position = card
+      ? { card, ...getDropPosition(card, e.clientX, e.clientY) }
+      : findNearestDropTarget(e.clientX, e.clientY);
 
-    // Fallback: drop không qua dragover live (giữ hành vi cũ)
-    if (state.isMultiDragging) {
-      if (!targetPage || card.classList.contains('selected')) return;
-
-      const selectedPages = state.pages.filter(p => p.isSelected);
-      const otherPages = state.pages.filter(p => !p.isSelected);
-
-      let targetPos = otherPages.indexOf(targetPage);
-      if (targetPos === -1) return;
-      const toIndex = parseInt(card.dataset.index, 10);
-      if (!isLeftHalf) targetPos += 1;
-
-      saveHistoryState();
-      const selectedCards = selectedPages.map(p => pagesGrid.querySelector(`.page-card[data-page-id="${p.id}"]`)).filter(Boolean);
-      const fragment = document.createDocumentFragment();
-      selectedCards.forEach(c => fragment.appendChild(c));
-      if (isLeftHalf) {
-        card.before(fragment);
-      } else {
-        card.after(fragment);
-      }
-      otherPages.splice(targetPos, 0, ...selectedPages);
-      state.pages = otherPages;
-      reindexGridCards(true);
-      updateSelectionUI();
-      dragDidDrop = true;
-      showToast(`Đã di chuyển ${selectedPages.length} trang tới vị trí mới!`, 'success');
-    } else {
-      const fromIndex = state.draggedIndex;
-      const toIndex = parseInt(card.dataset.index, 10);
-      if (fromIndex === null || fromIndex === toIndex) return;
-
-      let targetIndex = isLeftHalf ? toIndex : toIndex + 1;
-      if (fromIndex < targetIndex) targetIndex--;
-      if (fromIndex === targetIndex) return;
-
-      saveHistoryState();
-      const [movedPage] = state.pages.splice(fromIndex, 1);
-      state.pages.splice(targetIndex, 0, movedPage);
-
-      const draggedCard = pagesGrid.querySelector(`.page-card[data-page-id="${movedPage.id}"]`);
-      if (draggedCard && card) {
-        if (fromIndex < targetIndex) {
-          card.after(draggedCard);
-        } else {
-          card.before(draggedCard);
-        }
-        reindexGridCards(true);
-      } else {
-        renderGrid();
-      }
-      dragDidDrop = true;
-      showToast(`Đã di chuyển trang tới vị trí #${targetIndex + 1}`, 'success');
+    if (position && commitDraggedPages(position.card.dataset.pageId, position.before)) {
+      const movedIds = dragPageIds.slice();
+      flashMovedCards(movedIds);
+      showToast(`Đã di chuyển ${movedIds.length || 1} trang tới vị trí mới!`, 'success');
     }
+    clearDropMarker();
   });
 }
 
@@ -3553,71 +3614,127 @@ async function openPreviewModal(pageIndex) {
 // Exporting PDF
 // ==========================================================================
 
-async function exportPdfFromPages(pagesToExport, outputFileName, showNotification = true) {
-  if (pagesToExport.length === 0) {
-    alert('Không có trang nào để xuất!');
-    return;
+async function createPdfBytesFromPages(pagesToExport, options = {}) {
+  if (!Array.isArray(pagesToExport) || pagesToExport.length === 0) {
+    throw new Error('Không có trang nào để xuất');
   }
 
-  if (showNotification) {
-    showToast('Đang tạo và xử lý tệp PDF...', 'success');
+  await ensurePdfLibLoaded();
+  const outPdf = await PDFLib.PDFDocument.create();
+
+  // Gom nhóm theo nguồn để chỉ gọi copyPages một lần cho mỗi tài liệu.
+  const pagesBySource = new Map();
+  pagesToExport.forEach(item => {
+    if (!pagesBySource.has(item.sourceId)) pagesBySource.set(item.sourceId, []);
+    pagesBySource.get(item.sourceId).push(item);
+  });
+
+  const copiedPagesMap = new Map();
+  for (const [sourceId, items] of pagesBySource.entries()) {
+    const srcObj = state.sources.get(sourceId);
+    if (!srcObj) throw new Error('Không tìm thấy tệp PDF nguồn');
+    const pdfLibDoc = await getSourcePdfLibDoc(srcObj);
+    const uniqueIndices = Array.from(new Set(items.map(it => it.pageIndex)));
+    const copiedBatch = await outPdf.copyPages(pdfLibDoc, uniqueIndices);
+    uniqueIndices.forEach((pIdx, idx) => copiedPagesMap.set(`${sourceId}_${pIdx}`, copiedBatch[idx]));
   }
+
+  for (const item of pagesToExport) {
+    const copiedPage = copiedPagesMap.get(`${item.sourceId}_${item.pageIndex}`);
+    if (!copiedPage) throw new Error(`Không sao chép được trang ${item.pageIndex + 1}`);
+    if (item.rotation !== 0) {
+      const currentRot = copiedPage.getRotation().angle;
+      copiedPage.setRotation(PDFLib.degrees((currentRot + item.rotation) % 360));
+    }
+    if (item.stamps && item.stamps.length > 0) await embedStampsOnPdfPage(outPdf, copiedPage, item.stamps);
+    outPdf.addPage(copiedPage);
+  }
+
+  if (!options.removeMetadata) {
+    await applySourceDocMeta(outPdf, pagesToExport);
+    applyDocMeta(outPdf);
+  }
+  return await outPdf.save(options.saveOptions || {});
+}
+
+async function buildExportBookmarkTree(pagesToExport) {
+  const sourcesInOrder = [];
+  const pageMaps = new Map();
+  pagesToExport.forEach((item, outputIndex) => {
+    let source = sourcesInOrder.find(entry => entry.sourceId === item.sourceId);
+    if (!source) {
+      source = { sourceId: item.sourceId, srcObj: state.sources.get(item.sourceId), firstPage: outputIndex + 1 };
+      sourcesInOrder.push(source);
+      pageMaps.set(item.sourceId, new Map());
+    }
+    const pageMap = pageMaps.get(item.sourceId);
+    if (!pageMap.has(item.pageIndex)) pageMap.set(item.pageIndex, outputIndex + 1);
+  });
+
+  const combined = [];
+  for (const source of sourcesInOrder) {
+    if (!source.srcObj || !source.srcObj.pdfJsDoc) continue;
+    let outline;
+    try {
+      outline = await source.srcObj.pdfJsDoc.getOutline();
+    } catch (err) {
+      throw new Error(`Không đọc được bookmark của ${source.srcObj.name || 'tệp PDF'}`);
+    }
+    if (!outline || outline.length === 0) continue;
+    const resolved = await resolveOutlineItems(source.srcObj.pdfJsDoc, outline);
+    const mapped = remapOutlineTree(resolved, pageMaps.get(source.sourceId));
+    if (mapped.length === 0) continue;
+
+    if (sourcesInOrder.length > 1) {
+      combined.push({
+        title: source.srcObj.name || source.sourceId,
+        page: source.firstPage,
+        kids: mapped,
+      });
+    } else {
+      combined.push(...mapped);
+    }
+  }
+  return combined;
+}
+
+async function finalizePdfBytesWithBookmarks(pdfBytes, pagesToExport) {
+  const bookmarks = await buildExportBookmarkTree(pagesToExport);
+  if (bookmarks.length === 0) return pdfBytes;
+
+  const form = new FormData();
+  form.append('pdf', new Blob([pdfBytes], { type: 'application/pdf' }), 'crafted.pdf');
+  form.append('bookmarks', new Blob([JSON.stringify(bookmarks)], { type: 'application/json' }), 'bookmarks.json');
+  let response;
+  try {
+    response = await fetch('/api/export/finalize', { method: 'POST', body: form });
+  } catch (err) {
+    throw new Error('Không thể bảo toàn bookmark. Hãy mở giao diện bằng PDFCraft.exe rồi thử lại.');
+  }
+  if (!response.ok) {
+    const detail = (await response.text()).trim();
+    throw new Error(detail || 'Không thể bảo toàn bookmark trong PDF đã xuất');
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+async function exportPdfFromPages(pagesToExport, outputFileName, showNotification = true) {
+  if (!pagesToExport || pagesToExport.length === 0) {
+    alert('Không có trang nào để xuất!');
+    return false;
+  }
+  if (showNotification) showToast('Đang tạo và xử lý tệp PDF...', 'success');
 
   try {
-    await ensurePdfLibLoaded();
-    const outPdf = await PDFLib.PDFDocument.create();
-
-    // Gom nhóm các trang theo tài liệu nguồn để batch copyPages một lần duy nhất (nhanh gấp 3-5 lần)
-    const pagesBySource = new Map();
-    pagesToExport.forEach(item => {
-      if (!pagesBySource.has(item.sourceId)) {
-        pagesBySource.set(item.sourceId, []);
-      }
-      pagesBySource.get(item.sourceId).push(item);
-    });
-
-    const copiedPagesMap = new Map();
-    for (const [sourceId, items] of pagesBySource.entries()) {
-      const srcObj = state.sources.get(sourceId);
-      if (!srcObj) continue;
-      const pdfLibDoc = await getSourcePdfLibDoc(srcObj);
-      const uniqueIndices = Array.from(new Set(items.map(it => it.pageIndex)));
-      const copiedBatch = await outPdf.copyPages(pdfLibDoc, uniqueIndices);
-      uniqueIndices.forEach((pIdx, idx) => {
-        copiedPagesMap.set(`${sourceId}_${pIdx}`, copiedBatch[idx]);
-      });
-    }
-
-    for (const item of pagesToExport) {
-      let copiedPage = copiedPagesMap.get(`${item.sourceId}_${item.pageIndex}`);
-      if (!copiedPage) {
-        const srcObj = state.sources.get(item.sourceId);
-        const pdfLibDoc = await getSourcePdfLibDoc(srcObj);
-        [copiedPage] = await outPdf.copyPages(pdfLibDoc, [item.pageIndex]);
-      }
-
-      if (item.rotation !== 0) {
-        const currentRot = copiedPage.getRotation().angle;
-        copiedPage.setRotation(PDFLib.degrees((currentRot + item.rotation) % 360));
-      }
-
-      if (item.stamps && item.stamps.length > 0) {
-        await embedStampsOnPdfPage(outPdf, copiedPage, item.stamps);
-      }
-
-      outPdf.addPage(copiedPage);
-    }
-
-    applyDocMeta(outPdf);
-    const pdfBytes = await outPdf.save();
+    let pdfBytes = await createPdfBytesFromPages(pagesToExport);
+    pdfBytes = await finalizePdfBytesWithBookmarks(pdfBytes, pagesToExport);
     downloadBlob(pdfBytes, outputFileName);
-
-    if (showNotification) {
-      showToast(`Đã xuất thành công tệp: ${outputFileName}!`, 'success');
-    }
+    if (showNotification) showToast(`Đã xuất thành công tệp: ${outputFileName}!`, 'success');
+    return true;
   } catch (err) {
     console.error('Lỗi khi xuất PDF:', err);
     showToast('Lỗi khi xuất file: ' + err.message, 'danger');
+    return false;
   }
 }
 
@@ -3631,6 +3748,35 @@ function downloadBlob(data, fileName, mimeType) {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function sanitizeArchiveName(value) {
+  return String(value || 'pdf')
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/[. ]+$/g, '')
+    .trim() || 'pdf';
+}
+
+function getArchiveName(pagesToExport, suffix) {
+  const sourceIds = [...new Set((pagesToExport || []).map(item => item.sourceId))];
+  if (sourceIds.length === 1) {
+    const src = state.sources.get(sourceIds[0]);
+    const base = src ? src.name.replace(/\.pdf$/i, '') : 'pdfcraft';
+    return `${sanitizeArchiveName(base)}_${suffix}.zip`;
+  }
+  return `pdfcraft_${suffix}.zip`;
+}
+
+function createZipBytes(entries) {
+  if (!window.fflate || typeof window.fflate.zip !== 'function') {
+    return Promise.reject(new Error('Không tải được bộ đóng gói ZIP nội bộ'));
+  }
+  return new Promise((resolve, reject) => {
+    window.fflate.zip(entries, { level: 0 }, (err, data) => {
+      if (err) reject(err);
+      else resolve(data);
+    });
+  });
 }
 
 // ==========================================================================
@@ -3656,6 +3802,7 @@ function setupCompressEvents() {
     compressProgressBox.style.display = 'none';
     btnExecuteCompress.disabled = false;
     btnCancelCompress.disabled = false;
+    updateCompressionImpactSummary();
     compressModal.classList.add('active');
   });
 
@@ -3677,6 +3824,7 @@ function setupCompressEvents() {
       btn.classList.toggle('active', btn.dataset.dpi === String(val));
     });
     updatePresetActiveStatus(null);
+    updateCompressionImpactSummary();
   });
 
   dpiQuickBtns.forEach(btn => {
@@ -3687,6 +3835,7 @@ function setupCompressEvents() {
       dpiQuickBtns.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       updatePresetActiveStatus(null);
+      updateCompressionImpactSummary();
     });
   });
 
@@ -3711,6 +3860,7 @@ function setupCompressEvents() {
   qualityRange.addEventListener('input', () => {
     updateQualityDesc(qualityRange.value);
     updatePresetActiveStatus(null);
+    updateCompressionImpactSummary();
   });
 
   // Preset Handlers
@@ -3732,6 +3882,7 @@ function setupCompressEvents() {
     ].forEach(chk => { if (chk) chk.checked = true; });
 
     updatePresetActiveStatus(presetName);
+    updateCompressionImpactSummary();
   };
 
   const updatePresetActiveStatus = (activePreset) => {
@@ -3790,6 +3941,41 @@ function setupCompressEvents() {
 
     executeCompressAndExport(state.pages, fileName, options);
   });
+
+  [
+    optRasterizeHeavy, optSubsetFonts, optGrayscale, optFlattenForms,
+    optRemoveOutputIntents, optRemoveAttachments, optRemoveAnnotations,
+    optRemoveOutlines, optRemoveMetadata, optRemoveStructureTree,
+  ].filter(Boolean).forEach(input => input.addEventListener('change', () => {
+    updatePresetActiveStatus(null);
+    updateCompressionImpactSummary();
+  }));
+
+  updateQualityDesc(qualityRange.value);
+  updateCompressionImpactSummary();
+}
+
+function updateCompressionImpactSummary() {
+  if (!compressImpactSummary) return;
+  const effects = [];
+  if (optRasterizeHeavy && optRasterizeHeavy.checked) effects.push('raster hóa trang đồ họa phức tạp, có thể mất khả năng tìm hoặc chọn văn bản trên các trang đó');
+  if (optSubsetFonts && optSubsetFonts.checked) effects.push('tối giản font nhúng, có thể đổi cách hiển thị font đặc biệt');
+  if (optGrayscale && optGrayscale.checked) effects.push('chuyển ảnh sang thang xám');
+  if (optFlattenForms && optFlattenForms.checked) effects.push('biểu mẫu sẽ không còn sửa được');
+  if (optRemoveOutputIntents && optRemoveOutputIntents.checked) effects.push('xóa cấu hình màu dành cho nhà in');
+  if (optRemoveAttachments && optRemoveAttachments.checked) effects.push('xóa tệp đính kèm nhúng');
+  if (optRemoveAnnotations && optRemoveAnnotations.checked) effects.push('xóa chú thích và nét vẽ');
+  if (optRemoveOutlines && optRemoveOutlines.checked) effects.push('xóa bookmark');
+  if (optRemoveMetadata && optRemoveMetadata.checked) effects.push('xóa metadata gốc');
+  if (optRemoveStructureTree && optRemoveStructureTree.checked) effects.push('xóa cấu trúc trợ năng');
+  const dpi = dpiRange ? Number(dpiRange.value) : 150;
+  const quality = qualityRange ? Number(qualityRange.value) : 75;
+  if (dpi < 150 || quality < 70) effects.push(`giảm độ nét ảnh xuống ${dpi} DPI và chất lượng ${quality}%`);
+
+  compressImpactSummary.classList.toggle('has-impact', effects.length > 0);
+  compressImpactSummary.textContent = effects.length
+    ? `Cấu hình hiện tại có thể: ${effects.join('; ')}. Tệp gốc vẫn được giữ nguyên.`
+    : 'Cấu hình hiện tại giữ nội dung tài liệu; kết quả sẽ được lưu thành tệp mới.';
 }
 
 async function executeCompressAndExport(pagesToExport, outputFileName, options) {
@@ -4037,8 +4223,11 @@ async function executeCompressAndExport(pagesToExport, outputFileName, options) 
       }
     }
 
-    // Áp metadata tùy chỉnh sau khi strip (giá trị người dùng đặt luôn thắng)
-    applyDocMeta(outPdf);
+    // Preserve original metadata unless the user selected its removal.
+    if (!options.removeMetadata) {
+      await applySourceDocMeta(outPdf, pagesToExport);
+      applyDocMeta(outPdf);
+    }
 
     // Maximum Flate Stream compression
     updateProgress(pagesToExport.length, pagesToExport.length, 'Đang nén Flate luồng dữ liệu & đóng gói...');
@@ -4065,6 +4254,10 @@ async function executeCompressAndExport(pagesToExport, outputFileName, options) 
       }
     } catch (backendErr) {
       console.warn('Goroutine backend optimize bỏ qua, dùng bản nén frontend:', backendErr);
+    }
+
+    if (!options.removeOutlines) {
+      pdfBytes = await finalizePdfBytesWithBookmarks(pdfBytes, pagesToExport);
     }
 
     const compressedSize = pdfBytes.byteLength;
@@ -5158,6 +5351,7 @@ function setupSignatureEvents() {
           const on = other.id === t.id;
           other.btn.classList.toggle('active', on);
           other.btn.setAttribute('aria-selected', on ? 'true' : 'false');
+          other.btn.tabIndex = on ? 0 : -1;
         }
         if (other.pane) other.pane.style.display = other.id === t.id ? 'flex' : 'none';
       });

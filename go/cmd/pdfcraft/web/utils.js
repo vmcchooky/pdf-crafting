@@ -115,6 +115,34 @@ function findTextMatches(pages, query, options) {
   return out;
 }
 
+/**
+ * Remap PDF.js outline nodes to 1-based output pages.
+ * outputPageBySource maps a source page index to its first output occurrence.
+ * Nodes targeting omitted pages are removed while surviving children are kept
+ * at the same level; structural headings inherit their first child's target.
+ */
+function remapOutlineTree(items, outputPageBySource) {
+  const out = [];
+  for (const item of items || []) {
+    const kids = remapOutlineTree(item.kids || [], outputPageBySource);
+    const hasTarget = Number.isInteger(item.pageIndex);
+    const page = hasTarget ? outputPageBySource.get(item.pageIndex) : null;
+
+    if (hasTarget && !Number.isInteger(page)) {
+      out.push(...kids);
+      continue;
+    }
+    if (!Number.isInteger(page) && kids.length === 0) continue;
+
+    out.push({
+      title: String(item.title || '(không tên)'),
+      page: Number.isInteger(page) ? page : kids[0].page,
+      kids,
+    });
+  }
+  return out;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { LRUCache, escapeHtml, formatBytes, normalizeText, findTextMatches };
+  module.exports = { LRUCache, escapeHtml, formatBytes, normalizeText, findTextMatches, remapOutlineTree };
 }

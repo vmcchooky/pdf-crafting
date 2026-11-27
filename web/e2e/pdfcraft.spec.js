@@ -4,6 +4,12 @@
  */
 const { test, expect } = require('@playwright/test');
 const path = require('path');
+const fs = require('fs');
+const PDFLib = require('../vendor/pdf-lib.min.js');
+const pdfjsLib = require('../vendor/pdf.min.js');
+const { unzipSync } = require('fflate');
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = require.resolve('../vendor/pdf.worker.min.js');
 
 const FIXTURE = path.join(__dirname, 'fixtures', 'sample.pdf');
 const ENCRYPTED_FIXTURE = path.join(__dirname, 'fixtures', 'encrypted.pdf');
@@ -53,6 +59,144 @@ test.describe('PDF Craft Web UI', () => {
     await page.locator('#btnExportPdf').click();
     const download = await downloadPromise;
     expect(await download.suggestedFilename()).toMatch(/\.pdf$/i);
+  });
+
+  test('export keeps source metadata and applies user overrides', async ({ page }) => {
+    const source = await PDFLib.PDFDocument.create();
+    source.addPage();
+    source.setTitle('Source title');
+    source.setAuthor('Office team');
+    source.setProducer('Office PDF Exporter');
+    source.setCreationDate(new Date('2026-01-02T03:04:05.000Z'));
+    source.setModificationDate(new Date('2026-02-03T04:05:06.000Z'));
+    const sourceBytes = await source.save();
+
+    await page.goto('/web/index.html');
+    await page.setInputFiles('#fileInput', {
+      name: 'metadata-source.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from(sourceBytes),
+    });
+    await expect(page.locator('.page-card')).toHaveCount(1, { timeout: 30000 });
+
+    await page.locator('#btnMetaEdit').click();
+    await page.fill('#inputMetaTitle', 'Edited title');
+    await page.locator('#btnSaveMeta').click();
+
+    const downloadPromise = page.waitForEvent('download', { timeout: 30000 });
+    await page.locator('#btnExportPdf').click();
+    const download = await downloadPromise;
+    const exportedBytes = new Uint8Array(await fs.promises.readFile(await download.path()));
+    const exported = await pdfjsLib.getDocument({ data: exportedBytes }).promise;
+    const { info } = await exported.getMetadata();
+    expect(info.Title).toBe('Edited title');
+    expect(info.Author).toBe('Office team');
+    expect(info.Producer).toBe('Office PDF Exporter');
+    expect(pdfjsLib.PDFDateString.toDateObject(info.CreationDate).getTime()).toBe(new Date('2026-01-02T03:04:05.000Z').getTime());
+    expect(pdfjsLib.PDFDateString.toDateObject(info.ModDate).getTime()).toBe(new Date('2026-02-03T04:05:06.000Z').getTime());
+    await exported.destroy();
+  });
+
+  test('split all pages downloads one ZIP containing one PDF per page', async ({ page }) => {
+    await uploadSample(page);
+    const downloadPromise = page.waitForEvent('download', { timeout: 30000 });
+    await page.locator('#btnSplitAll').click();
+    const download = await downloadPromise;
+    expect(await download.suggestedFilename()).toMatch(/_split\.zip$/i);
+
+    const archive = unzipSync(new Uint8Array(await fs.promises.readFile(await download.path())));
+    const names = Object.keys(archive).filter(name => name.endsWith('.pdf'));
+    expect(names).toHaveLength(3);
+    for (const name of names) {
+      const pdf = await PDFLib.PDFDocument.load(archive[name]);
+      expect(pdf.getPageCount()).toBe(1);
+    }
+  });
+
+  test('group export downloads one ZIP with a PDF for each non-empty group', async ({ page }) => {
+    await uploadSample(page);
+    await page.locator('#btnNewGroup').click();
+    await page.fill('#inputGroupName', 'Invoices');
+    await page.locator('#btnSaveGroup').click();
+
+    await page.locator('#btnSelectAll').click();
+    await page.locator('#btnAssignGroup').click();
+    await page.locator('#groupChecklist input').check({ force: true });
+    await page.locator('#btnConfirmAssignGroup').click();
+
+    const downloadPromise = page.waitForEvent('download', { timeout: 30000 });
+    await page.locator('#btnExportGroups').click();
+    const download = await downloadPromise;
+    expect(await download.suggestedFilename()).toBe('pdfcraft_groups.zip');
+
+    const archive = unzipSync(new Uint8Array(await fs.promises.readFile(await download.path())));
+    const names = Object.keys(archive).filter(name => name.endsWith('.pdf'));
+    expect(names).toEqual(['01_Invoices.pdf']);
+    const groupedPdf = await PDFLib.PDFDocument.load(archive[names[0]]);
+    expect(groupedPdf.getPageCount()).toBe(3);
+  });
+
+  test('export remaps source bookmarks after page reorder', async ({ page }) => {
+    const sourcePdf = await fs.promises.readFile(FIXTURE);
+    let submittedBookmarks = null;
+    await page.route('**/api/export/finalize', async route => {
+      const body = route.request().postDataBuffer().toString('latin1');
+      const partStart = body.indexOf('name="bookmarks"');
+      expect(partStart).toBeGreaterThanOrEqual(0);
+      const jsonStart = body.indexOf('\r\n\r\n', partStart) + 4;
+      const jsonEnd = body.indexOf('\r\n--', jsonStart);
+      submittedBookmarks = JSON.parse(body.slice(jsonStart, jsonEnd));
+      await route.fulfill({ status: 200, contentType: 'application/pdf', body: sourcePdf });
+    });
+
+    await page.goto('/web/index.html');
+    await page.setInputFiles('#fileInput', path.join(__dirname, 'fixtures', 'outline.pdf'));
+    await expect(page.locator('.page-card')).toHaveCount(3, { timeout: 30000 });
+    await page.locator('.page-card').nth(2).locator('.custom-checkbox').check({ force: true });
+    await page.locator('#btnMoveStart').click();
+
+    const downloadPromise = page.waitForEvent('download', { timeout: 30000 });
+    await page.locator('#btnExportPdf').click();
+    const download = await downloadPromise;
+    expect(await download.suggestedFilename()).toMatch(/\.pdf$/i);
+    expect(submittedBookmarks).toHaveLength(2);
+    expect(submittedBookmarks.some(bookmark => bookmark.page === 1)).toBe(true);
+  });
+
+  test('compression defaults to maximum and describes its impact inline', async ({ page }) => {
+    await uploadSample(page);
+    await page.locator('#btnOpenCompressModal').click();
+    await expect(page.locator('#compressModal')).toHaveAttribute('aria-hidden', 'false');
+    await expect(page.locator('#presetMaxCompress')).toHaveClass(/active/);
+    await expect(page.locator('#dpiRange')).toHaveValue('96');
+    await expect(page.locator('#qualityRange')).toHaveValue('40');
+    await expect(page.locator('#compressImpactSummary')).toContainText('96 DPI');
+    await expect(page.locator('#compressImpactSummary')).toContainText('xóa bookmark');
+
+    await page.locator('#advancedCompressDetails summary').click();
+    await page.locator('#optRemoveOutlines').uncheck({ force: true });
+    await expect(page.locator('#presetMaxCompress')).not.toHaveClass(/active/);
+    await expect(page.locator('#compressImpactSummary')).not.toContainText('xóa bookmark');
+  });
+
+  test('modal traps focus, closes with Escape, and restores focus', async ({ page }) => {
+    await uploadSample(page);
+    const opener = page.locator('#btnOpenCompressModal');
+    await opener.click();
+    const dialog = page.locator('#compressModal');
+    await expect(dialog).toHaveAttribute('role', 'dialog');
+    await expect(dialog).toHaveAttribute('aria-modal', 'true');
+    await expect.poll(() => dialog.evaluate(el => el.contains(document.activeElement))).toBe(true);
+
+    await dialog.evaluate(el => {
+      const controls = Array.from(el.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+      controls.filter(control => control.getClientRects().length > 0).at(-1).focus();
+    });
+    await page.keyboard.press('Tab');
+    await expect.poll(() => dialog.locator(':focus').count()).toBe(1);
+    await page.keyboard.press('Escape');
+    await expect(dialog).not.toHaveClass(/active/);
+    await expect(opener).toBeFocused();
   });
 
   test('metadata modal saves values', async ({ page }) => {
