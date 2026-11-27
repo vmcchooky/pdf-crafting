@@ -18,8 +18,12 @@ Hệ quả lên các chặng:
   - [x] Release: build ma trận **amd64 + arm64** (`CGO_ENABLED=0`, `-trimpath`) + `SHA256SUMS.txt` kèm mỗi release.
   - [x] `HUONG-DAN.md`: hướng dẫn tặng kèm — mở lần đầu, qua SmartScreen, mẹo menu chuột phải.
   - [x] README: sửa dung lượng exe "~10 MB" → "~15 MB" theo số đo thật.
-- **Còn lại của Chặng 0 (chưa làm, chủ đích):** di chuyển vật lý `python/` → `legacy/python/` — thay đổi mang tính hình thức nhưng phải sửa đồng bộ CI (5 tham chiếu), `pyproject.toml`, `pyrightconfig.json`, README; để làm riêng một đợt có kiểm chứng CI, tránh phá cây đang ổn định. Trạng thái "Python đóng băng" áp dụng ngay từ bây giờ dù thư mục chưa dời.
-- `convert` khi thiếu LibreOffice: thông báo lỗi hiện tại đã rõ ràng và có hướng dẫn — giữ nguyên; đường COM qua MS Office để dành khi có nhu cầu thật từ người nhận.
+- **Đợt 2 (27/11, chiều muộn) — hoàn thiện:**
+  - [x] Chặng 0 xong hẳn: `python/` → `legacy/python/` (git mv, giữ lịch sử), bỏ job Python khỏi CI, cập nhật `pyproject.toml`/`pyrightconfig.json`/README/ROADMAP; thêm `legacy/README.md`.
+  - [x] **Tốc độ tách trang (split) nhanh hơn ~2,7 lần**: `SplitAll` chuyển từ CollectFile-từng-trang (phân tích lại tệp N lần) sang `SplitFile` của pdfcpu (phân tích 1 lần) — đo bằng benchmark kèm trong repo (`BenchmarkSplitAll60`: 254 ms → 95 ms trên máy kiểm chứng). Phương án worker-pool song song đã thử và **loại bỏ bằng số đo**: chậm hơn trên máy ít nhân, tốn RAM hơn.
+  - [x] `convert`: thêm đường **Microsoft Office COM** (Word/Excel/PowerPoint qua PowerShell, danh sách file truyền bằng manifest JSON) khi máy Windows không có LibreOffice; thông báo lỗi khi thiếu cả hai đã rõ ràng.
+  - [x] Lệnh `version`/`--version` in phiên bản từ dữ liệu build Go tự nhúng (kèm VCS revision khi build từ checkout).
+  - [x] Rà soát an toàn server Web UI: chỉ bind `127.0.0.1`, giới hạn thân request 150 MB, tên file tải lên được rút gọn vào thư mục tạm riêng — đạt, không phải sửa.
 
 ## 0. Quyết định kiến trúc (đã chốt, không mở lại trừ khi có dữ kiện mới)
 
