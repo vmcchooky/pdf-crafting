@@ -177,7 +177,10 @@ func SplitAll(pdfPath, outDir string) ([]string, error) {
 	for i := 1; i <= count; i++ {
 		targetFile := filepath.Join(absOut, fmt.Sprintf("%s_page_%d.pdf", baseName, i))
 		pageStr := strconv.Itoa(i)
-		if err := api.CollectFile(absIn, targetFile, []string{pageStr}, nil); err != nil {
+		err := saveSafely(absIn, targetFile, func(tempTarget string) error {
+			return api.CollectFile(absIn, tempTarget, []string{pageStr}, nil)
+		})
+		if err != nil {
 			return nil, fmt.Errorf("lỗi trích xuất trang %d: %w", i, err)
 		}
 		createdFiles = append(createdFiles, targetFile)
@@ -201,7 +204,9 @@ func ExtractPages(pdfPath, outPath string, pageSelection []string) error {
 		return err
 	}
 
-	return api.CollectFile(absIn, absOut, pageSelection, nil)
+	return saveSafely(absIn, absOut, func(tempTarget string) error {
+		return api.CollectFile(absIn, tempTarget, pageSelection, nil)
+	})
 }
 
 // MovePage di chuyển trang từ fromPage sang toPage (1-based).
@@ -699,8 +704,19 @@ func AddTextWatermark(pdfPath, outPath, text string, pages []string, fontSize in
 	}
 	// nil = tất cả các trang (quy ước của pdfcpu)
 
-	desc := fmt.Sprintf("fontname:Helvetica, points:%d, rotation:%g, opacity:%g",
-		fontSize, rotation, opacity)
+	// Helvetica (font lõi) chỉ phủ bảng mã WinAnsi — văn bản có ký tự
+	// ngoài Latin-1 (điển hình: tiếng Việt) phải dùng font Unicode nhúng,
+	// nếu không dấu sẽ mất hoặc hiển thị sai.
+	fontName := "Helvetica"
+	if textNeedsUnicodeFont(text) {
+		if err := ensureWatermarkFont(); err != nil {
+			return fmt.Errorf("không cài được font Unicode cho watermark: %w", err)
+		}
+		fontName = watermarkFontName
+	}
+
+	desc := fmt.Sprintf("fontname:%s, points:%d, rotation:%g, opacity:%g",
+		fontName, fontSize, rotation, opacity)
 
 	return saveSafely(absIn, outPath, func(tempTarget string) error {
 		return api.AddTextWatermarksFile(absIn, tempTarget, selected, false, text, desc, nil)
