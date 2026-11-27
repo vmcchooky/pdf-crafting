@@ -11,6 +11,9 @@ permissions:
 jobs:
   release-windows:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -20,9 +23,31 @@ jobs:
         with:
           python-version: "3.12"
       - run: python scripts/sync_web.py --check
-      - working-directory: go
-        run: go build -ldflags="-s -w" -o ../PDFCraft.exe ./cmd/pdfcraft
+      - name: Build PDFCraft (Windows ${{ matrix.goarch }})
+        working-directory: go
+        env:
+          GOOS: windows
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go build -ldflags="-s -w" -trimpath -o ../PDFCraft-windows-${{ matrix.goarch }}.exe ./cmd/pdfcraft
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PDFCraft-windows-${{ matrix.goarch }}
+          path: PDFCraft-windows-${{ matrix.goarch }}.exe
+
+  publish:
+    needs: release-windows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Generate SHA-256 checksums
+        run: sha256sum PDFCraft-windows-*.exe > SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
-          files: PDFCraft.exe
+          files: |
+            PDFCraft-windows-amd64.exe
+            PDFCraft-windows-arm64.exe
+            SHA256SUMS.txt
           generate_release_notes: true
