@@ -1,4 +1,4 @@
-module github.com/user/pdfcraft
+module github.com/vmcchooky/pdf-crafting/go
 
 go 1.26.11
 
