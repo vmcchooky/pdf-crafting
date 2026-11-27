@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/user/pdfcraft/pkg/pdfcraft"
+	"github.com/vmcchooky/pdf-crafting/go/pkg/pdfcraft"
 )
 
 func printUsage() {
