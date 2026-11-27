@@ -119,7 +119,7 @@ func ConvertOfficeToPdf(inputPaths []string, outDir, enginePath string, timeoutS
 		if msOfficeAvailable() {
 			useMSOffice = true
 		} else {
-			return nil, fmt.Errorf("không tìm thấy LibreOffice hoặc Microsoft Office để chuyển đổi. Hãy cài LibreOffice (https://libreoffice.org) rồi thử lại, hoặc truyền -engine <đường_dẫn_soffice>")
+			return nil, engineMissingError()
 		}
 	}
 	if timeoutSec <= 0 {

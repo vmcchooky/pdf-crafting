@@ -813,7 +813,9 @@ func ExtractTextWithPassword(pdfPath, password string, pageSelection []string) (
 
 var tempCounter uint64
 
-// saveSafely hỗ trợ ghi an toàn (kể cả khi inPath trùng với outPath).
+// saveSafely ghi qua file tạm cùng thư mục rồi hoán đổi. Nếu rename thất bại
+// (ví dụ đích đang bị khóa) thì copy sang temp phụ rồi rename lại — không bao
+// giờ xóa hay ghi trực tiếp lên file đích trước khi thay thế thành công.
 func saveSafely(inPath, outPath string, writerFunc func(tempTarget string) error) error {
 	absOut, err := filepath.Abs(outPath)
 	if err != nil {
@@ -832,15 +834,19 @@ func saveSafely(inPath, outPath string, writerFunc func(tempTarget string) error
 		return err
 	}
 
-	// Đổi tên tệp tạm thành đích (hỗ trợ ghi đè an toàn trên Windows)
-	if err := os.Rename(tempFile, absOut); err != nil {
-		// Trên Windows, Rename có thể lỗi nếu absOut đã tồn tại -> xóa trước rồi rename
-		_ = os.Remove(absOut)
-		if err2 := os.Rename(tempFile, absOut); err2 != nil {
-			return copyFile(tempFile, absOut)
-		}
+	if err := os.Rename(tempFile, absOut); err == nil {
+		return nil
 	}
 
+	c2 := atomic.AddUint64(&tempCounter, 1)
+	replaceTemp := filepath.Join(filepath.Dir(absOut), fmt.Sprintf(".tmp_replace_%d_%d_%d.pdf", os.Getpid(), time.Now().UnixNano(), c2))
+	defer os.Remove(replaceTemp)
+	if err := copyFile(tempFile, replaceTemp); err != nil {
+		return fmt.Errorf("không thể thay thế tệp đích: %w", err)
+	}
+	if err := os.Rename(replaceTemp, absOut); err != nil {
+		return fmt.Errorf("không thể thay thế tệp đích: %w", err)
+	}
 	return nil
 }
 

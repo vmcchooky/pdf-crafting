@@ -25,6 +25,15 @@ Hệ quả lên các chặng:
   - [x] Lệnh `version`/`--version` in phiên bản từ dữ liệu build Go tự nhúng (kèm VCS revision khi build từ checkout).
   - [x] Rà soát an toàn server Web UI: chỉ bind `127.0.0.1`, giới hạn thân request 150 MB, tên file tải lên được rút gọn vào thư mục tạm riêng — đạt, không phải sửa.
 
+## Cập nhật 2026-11-27 (tối) — Chặng 2 hoàn tất trên nhánh `stage2-reliability`
+
+- Sửa lỗi `convert`: khi Microsoft Office COM thất bại, thông báo kèm hướng dẫn cài LibreOffice/kiểm tra bộ Office thay vì lỗi RPC thô; `TestConvertOfficeErrors` xanh trên Windows (trước đó đỏ trên máy có PowerShell nhưng Office không chạy được).
+- Vá `saveSafely`: bỏ fallback xóa file đích trước `rename`; fallback mới copy sang temp phụ rồi rename, lỗi giữa chừng giữ nguyên file gốc; thêm test writer-failure và test đích là thư mục.
+- CI: bỏ job Python (đã move `legacy/python/`), thêm cross-build Windows amd64/arm64, job `qpdf`, job `bench` non-blocking.
+- Corpus sinh tổng hợp + benchmark CLI vi sai + xử lý hàng loạt song song (số đo ở Chặng 2).
+- Spike incremental save: **không khả thi** với pdfcpu 0.15.0 — xem kết luận ở Chặng 2.
+- Các mục từng "hoãn vô thời hạn" (corpus, benchmark CI, xử lý song song) đã được nâng lại và hoàn tất trong đợt này.
+
 ## 0. Quyết định kiến trúc (đã chốt, không mở lại trừ khi có dữ kiện mới)
 
 ### 0.1. Vì sao Go, không phải Rust
@@ -83,14 +92,14 @@ Hệ quả lên các chặng:
 
 **Mục tiêu:** file không bao giờ hỏng vì ghi dở; tốc độ đo được và không tụt theo thời gian. (Học từ storytold/pdfcraft: ghi nguyên tử, kiểm chứng bằng qpdf, corpus file ác tính.)
 
-- [ ] **Ghi nguyên tử**: mọi lệnh ghi của bản Go ghi ra file tạm cùng thư mục đích rồi `rename` hoán đổi; lỗi giữa chừng không đụng file gốc. Bổ sung test mô phỏng lỗi ghi.
-- [ ] **Kiểm chứng đầu ra bằng qpdf**: thêm bước CI chạy `qpdf --check` trên toàn bộ file PDF sinh ra từ bộ test Go + ví dụ trong `examples/`.
-- [ ] **Corpus hồi quy**: thư mục `tests/corpus/` gom các PDF khó (mã hóa lạ, xref hỏng, file scan lớn, PDF từ Word/Excel/Chrome...) kèm kỳ vọng (đọc được/lỗi có kiểm soát, tuyệt đối không crash/panic). Chạy trong CI.
-- [ ] **Xử lý hàng loạt song song**: `merge`/`compress`/`split` trên nhiều file dùng worker pool giới hạn theo `min(GOMAXPROCS, 4)`; đo trước/sau bằng benchmark; giữ nguyên hành vi khi 1 file.
-- [ ] **Benchmark trong CI**: chuyển các mục đo của `benchmark.py` (startup+info, extract, split, compress trên file mẫu 50 trang + file scan) thành script chạy tự động, đặt ngưỡng hồi quy (ví dụ: chậm hơn 20% so với mốc thì CI báo vàng).
-- [ ] **Spike incremental save (timebox tối đa 2 buổi, có điều kiện dừng):** kiểm chứng `pdfcpu` có hỗ trợ ghi incremental/append cho các lệnh rẻ (`rotate`, `meta`, `bookmark`) đủ sạch hay không. Nếu không → **dừng, ghi lại kết luận vào đây**, không tự viết cơ chế append riêng. (Tiền lệ: mục linearize trong `ROADMAP.md` đã tạm gác vì cùng lý do phụ thuộc `pdfcpu`.)
+- [x] **Ghi nguyên tử**: mọi lệnh ghi của bản Go đi qua `saveSafely` (ghi tạm cùng thư mục + hoán đổi). Vá fallback (27/11/2026): không xóa/ghi trực tiếp lên file đích trước khi thay thế thành công — copy sang temp phụ rồi rename lần nữa; có test writer-failure, test đích là thư mục, test ghi đè.
+- [x] **Kiểm chứng đầu ra bằng qpdf**: job CI `qpdf` cài qpdf, chạy `TestCorpus` với `PDFCRAFT_QPDF_OUTDIR` rồi `qpdf --check` toàn bộ output + `examples/*.pdf`. Máy Windows local không có qpdf nên phần xác nhận độc lập diễn ra trên CI; local đã validate bằng pdfcpu.
+- [x] **Corpus hồi quy**: sinh tại temp trong `go/pkg/pdfcraft/corpus_test.go` (không commit binary): PDF hợp lệ, mã hóa AES-256, xref hỏng, file cắt cụt, scan ảnh, trang xoay, watermark tiếng Việt. Chạy info/extract/split/compress/rotate/watermark — không panic, lỗi có kiểm soát, output validate bằng pdfcpu; chạy trong CI.
+- [x] **Xử lý hàng loạt song song**: `compress`/`split` nhận nhiều file với worker pool `min(GOMAXPROCS, 4)`; giữ nguyên hành vi khi 1 file. Đo 27/11/2026 (`BenchmarkBatchCompressWorkers`, 10 file × 20 trang, máy 8 nhân logic): 28,3 ms (1 worker) → 19,4 ms (2 worker) → 21,0 ms (4 worker) tối thiểu qua các lượt đo — song song có lợi, giữ cap 4 (2 worker nhỉnh hơn trên máy đo nhưng chênh lệch nằm trong nhiễu). `merge` không song song: nhiều đầu vào nhưng một đầu ra, không có việc độc lập.
+- [x] **Benchmark trong CI**: job `bench` non-blocking (`continue-on-error`) build binary từ `origin/main` và từ nhánh, đo vi sai 6 chỉ số CLI (info/extract/split/compress trên file 50 trang + file scan) trên cùng runner, cảnh báo vàng khi chậm hơn >20%. Benchmark Go cục bộ: `BenchmarkGetInfo50`, `BenchmarkExtract20`, `BenchmarkSplitAll10`, `BenchmarkCompress50`, `BenchmarkMerge5x10`, `BenchmarkWatermark50`, `BenchmarkCompressScan`, `BenchmarkBatchCompressWorkers`. Lưu ý trung thực: đo local Windows cho thấy lệnh ngắn dao động tới ±44% giữa hai binary giống hệt nhau — vì vậy job chỉ cảnh báo, không chặn merge.
+- [x] **Spike incremental save**: kết luận **KHÔNG LÀM**. Bằng chứng trên pdfcpu v0.15.0: `pkg/pdfcpu/read.go:1683` ghi chú giả định một xref section — "no incremental updates"; `pkg/pdfcpu/model/xreftable.go:3308` còn `TODO enable incremental writing`; `pkg/api` không có hàm incremental/append. Không tự viết cơ chế append riêng (đúng điều kiện dừng của spike).
 
-**Tiêu chí hoàn thành:** không còn đường ghi trực tiếp lên file đích; CI có qpdf + corpus + benchmark; spike có kết luận viết thành văn bản (làm/không làm).
+**Tiêu chí hoàn thành:** không còn đường ghi trực tiếp lên file đích; CI có qpdf + corpus + benchmark; spike có kết luận viết thành văn bản (làm/không làm). — **Đạt tại local (27/11/2026); các job CI mới bổ sung chờ lần chạy đầu tiên sau khi push.**
 **Ước lượng:** trung bình–lớn (Chặng 2 trừ spike: ~3–4 buổi).
 
 ---

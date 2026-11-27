@@ -44,7 +44,7 @@ func printUsage() {
 	fmt.Println("  pdfcraft <lệnh> [tùy chọn...]")
 	fmt.Println("\nCÁC LỆNH HỖ TRỢ:")
 	fmt.Println("  info    <tệp.pdf>                             Xem thông tin chi tiết, số trang, kích thước")
-	fmt.Println("  split   <tệp.pdf> [-d <thư_mục_đích>]         Tách từng trang thành các tệp riêng biệt")
+	fmt.Println("  split   <tệp.pdf> [<tệp2.pdf> ...] [-d <thư_mục_đích>]  Tách từng trang thành các tệp riêng biệt")
 	fmt.Println("  extract <tệp.pdf> -pages <1,3,5-7> -o <đích>  Trích xuất dải trang ra tệp PDF mới")
 	fmt.Println("  move    <tệp.pdf> -from <trang> -to <vị_trí> [-o <đích>]   Di chuyển trang tới vị trí mới")
 	fmt.Println("  reorder <tệp.pdf> -order <3,1,2,4> [-o <đích>]             Đổi toàn bộ thứ tự các trang")
@@ -58,7 +58,7 @@ func printUsage() {
 	fmt.Println("  decrypt <tệp.pdf> --password <pw> [-o <đích>]  Giải mã file PDF về bản không mật khẩu")
 	fmt.Println("  meta    <tệp.pdf> [--title <t>] [--author <t>] ... [-o <đích>]  Sửa metadata tài liệu")
 	fmt.Println("  watermark <tệp.pdf> --text <chữ> [--pages <1,2>] [--font-size 48] [--rotation 45] [--opacity 0.3] [-o <đích>]  Đóng dấu chìm")
-	fmt.Println("  compress <tệp.pdf> [-o <đích>]  Tối ưu giảm dung lượng không mất dữ liệu")
+	fmt.Println("  compress <tệp.pdf> [<tệp2.pdf> ...] [-o <đích> | -d <thư_mục>]  Tối ưu giảm dung lượng không mất dữ liệu")
 	fmt.Println("  convert <a.docx> <b.xlsx> [...] [-d <thư_mục>] [--engine <soffice>]  Chuyển Office sang PDF hàng loạt")
 	fmt.Println("  ui      [-p <cổng, mặc định 8080>] [tệp.pdf]  Khởi chạy Giao diện Web UI kéo thả mượt mà")
 	fmt.Println("  open    <tệp.pdf>                             Khởi chạy Web UI và nạp ngay tệp PDF chỉ định")
@@ -270,11 +270,37 @@ func runSplit(args []string) {
 	tail := parseFlagsAndArgs(fs, args)
 
 	if len(tail) < 1 {
-		fmt.Println("Cách dùng: pdfcraft split <tệp.pdf> [-d <thư_mục_đích>]")
+		fmt.Println("Cách dùng: pdfcraft split <tệp.pdf> [<tệp2.pdf> ...] [-d <thư_mục_đích>]")
 		os.Exit(1)
 	}
-	inFile := tail[0]
 
+	if len(tail) > 1 {
+		if *outDir == "" {
+			fmt.Println("[LỖI] Cần -d <thư_mục> khi tách nhiều file")
+			os.Exit(1)
+		}
+		results, err := pdfcraft.BatchSplit(tail, *outDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
+			os.Exit(1)
+		}
+		failures := 0
+		for _, r := range results {
+			if r.Err != nil {
+				failures++
+				fmt.Fprintf(os.Stderr, "[LỖI] %s: %v\n", filepath.Base(r.Input), r.Err)
+				continue
+			}
+			fmt.Printf("[+] %s -> %s\n", filepath.Base(r.Input), r.Output)
+		}
+		if failures > 0 {
+			fmt.Fprintf(os.Stderr, "[LỖI] %d/%d file thất bại\n", failures, len(results))
+			os.Exit(1)
+		}
+		return
+	}
+
+	inFile := tail[0]
 	targetDir := *outDir
 	if targetDir == "" {
 		base := strings.TrimSuffix(filepath.Base(inFile), filepath.Ext(inFile))
@@ -828,12 +854,44 @@ func runWatermark(args []string) {
 func runCompress(args []string) {
 	fs := flag.NewFlagSet("compress", flag.ExitOnError)
 	outFile := fs.String("o", "", "Đường dẫn file kết quả (ghi đè file gốc nếu để trống)")
+	outDir := fs.String("d", "", "Thư mục đích khi nén nhiều file")
 	tail := parseFlagsAndArgs(fs, args)
 
 	if len(tail) < 1 {
-		fmt.Println("Cách dùng: pdfcraft compress <tệp.pdf> [-o <kết_quả.pdf>]")
+		fmt.Println("Cách dùng: pdfcraft compress <tệp.pdf> [<tệp2.pdf> ...] [-o <kết_quả.pdf> | -d <thư_mục>]")
 		os.Exit(1)
 	}
+	if *outFile != "" && *outDir != "" {
+		fmt.Println("[LỖI] Chỉ dùng một trong -o hoặc -d")
+		os.Exit(1)
+	}
+
+	if len(tail) > 1 || *outDir != "" {
+		if *outDir == "" {
+			fmt.Println("[LỖI] Cần -d <thư_mục> khi nén nhiều file")
+			os.Exit(1)
+		}
+		results, err := pdfcraft.BatchCompress(tail, *outDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
+			os.Exit(1)
+		}
+		failures := 0
+		for _, r := range results {
+			if r.Err != nil {
+				failures++
+				fmt.Fprintf(os.Stderr, "[LỖI] %s: %v\n", filepath.Base(r.Input), r.Err)
+				continue
+			}
+			fmt.Printf("[+] %s -> %s\n", filepath.Base(r.Input), r.Output)
+		}
+		if failures > 0 {
+			fmt.Fprintf(os.Stderr, "[LỖI] %d/%d file thất bại\n", failures, len(results))
+			os.Exit(1)
+		}
+		return
+	}
+
 	inFile := tail[0]
 	targetOut := *outFile
 	if targetOut == "" {

@@ -63,7 +63,7 @@ func convertBatchMSOffice(ctx context.Context, batch []string, tmpDir string) er
 		if detail == "" {
 			detail = err.Error()
 		}
-		return fmt.Errorf("chuyển đổi bằng Microsoft Office thất bại: %s", detail)
+		return msOfficeFailureError(detail)
 	}
 	return nil
 }
