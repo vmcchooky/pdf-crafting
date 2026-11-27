@@ -49,7 +49,7 @@ pdf-crafting/
 │   ├── app.js                # Ứng dụng chính (sắp xếp, nhóm, ký, nén, tìm kiếm, project)
 │   ├── utils.js              # Hàm thuần túy dùng chung (có test Node)
 │   ├── tests/utils.test.js   # Test Node: node --test web/tests/utils.test.js
-│   ├── e2e/pdfcraft.spec.js  # Test E2E Playwright (5 kịch bản, Chromium)
+│   ├── e2e/pdfcraft.spec.js  # Test E2E Playwright (24 kịch bản, Chromium)
 │   ├── package.json          # npm scripts cho E2E (riêng thư mục web/)
 │   └── vendor/               # pdf.js + pdf-lib nội bộ
 ├── benchmark.py              # Script so sánh hiệu năng Python vs Go (gồm file scan)
@@ -204,7 +204,7 @@ convert_office_to_pdf(["a.docx", "b.xlsx"], output_dir="pdf_out/")
 | Python legacy (pytest, 34 tests) | `python -m pytest legacy/python/tests -q` | Bản đóng băng — chỉ chạy tay khi cần tham chiếu |
 | Go (`go test`) | `cd go; go test ./...` | parse, info, split, extract, move, reorder, rotate, merge, text, encrypt/decrypt, metadata, watermark, compress, convert (lỗi), concurrent |
 | Web (Node, 13 tests) | `node --test web/tests/utils.test.js` | LRUCache, escapeHtml, formatBytes, chuẩn hóa dấu, tìm kiếm |
-| Web E2E (Playwright, 5 tests) | `cd web; npm install; npx playwright install chromium; npx playwright test` | upload, xoay+undo/redo, tìm kiếm, xuất file, metadata |
+| Web E2E (Playwright, 24 tests) | `cd web; npm install; npx playwright install chromium; npx playwright test` | upload, phím ←/→ + Home/End, kéo-thả + undo, tìm kiếm, xuất file, metadata, nhóm, mục lục, project |
 
 CI (`.github/workflows/ci.yml`) chạy `go test -race`, `qpdf --check`, benchmark, Node unit và Playwright trên mỗi push/PR; bản Python legacy không còn nằm trong CI.
 

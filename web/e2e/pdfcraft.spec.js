@@ -274,4 +274,67 @@ test.describe('PDF Craft Web UI', () => {
     await expect(page.locator('#previewModal')).toHaveClass(/active/);
     await expect(page.locator('#modalPageNumBadge')).toHaveText('#3');
   });
+
+  test('project save button is visible after upload and downloads JSON', async ({ page }) => {
+    page.on('dialog', (dialog) => dialog.accept());
+    await uploadSample(page);
+    const saveButton = page.locator('#btnSaveProject');
+    await expect(saveButton).toBeVisible();
+    const downloadPromise = page.waitForEvent('download', { timeout: 30000 });
+    await saveButton.click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/\.pdfcraft\.json$/);
+  });
+
+  test('arrow keys move the selected page even when focus is on its checkbox', async ({ page }) => {
+    await uploadSample(page);
+    const ids = () => page.$$eval('.page-card', (els) => els.map((el) => el.dataset.pageId));
+    const before = await ids();
+    await page.locator('.page-card .custom-checkbox').first().click();
+    await expect(page.locator('.page-card').first()).toHaveClass(/selected/);
+
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(async () => (await ids()).join(',')).toBe([before[1], before[0], before[2]].join(','));
+
+    await page.keyboard.press('Control+z');
+    await expect.poll(async () => (await ids()).join(',')).toBe(before.join(','));
+  });
+
+  test('Home and End move the selection to document boundaries', async ({ page }) => {
+    await uploadSample(page);
+    const ids = () => page.$$eval('.page-card', (els) => els.map((el) => el.dataset.pageId));
+    const before = await ids();
+    await page.locator('.page-card .custom-checkbox').first().click();
+
+    await page.keyboard.press('End');
+    await expect.poll(async () => (await ids()).join(',')).toBe([before[1], before[2], before[0]].join(','));
+
+    await page.keyboard.press('Home');
+    await expect.poll(async () => (await ids()).join(',')).toBe(before.join(','));
+  });
+
+  test('arrow keys extend a multi-selected block and undo restores it', async ({ page }) => {
+    await uploadSample(page);
+    const ids = () => page.$$eval('.page-card', (els) => els.map((el) => el.dataset.pageId));
+    const before = await ids();
+    await page.locator('.page-card .custom-checkbox').nth(0).click();
+    await page.locator('.page-card .custom-checkbox').nth(1).click();
+
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(async () => (await ids()).join(',')).toBe([before[2], before[0], before[1]].join(','));
+
+    await page.keyboard.press('Control+z');
+    await expect.poll(async () => (await ids()).join(',')).toBe(before.join(','));
+  });
+
+  test('arrow keys do not move pages while editing a page title', async ({ page }) => {
+    await uploadSample(page);
+    const ids = () => page.$$eval('.page-card', (els) => els.map((el) => el.dataset.pageId));
+    const before = await ids();
+    await page.locator('.page-card .custom-checkbox').first().click();
+    await page.locator('.card-title-input').first().click();
+
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(async () => (await ids()).join(',')).toBe(before.join(','));
+  });
 });

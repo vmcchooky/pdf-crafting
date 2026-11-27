@@ -102,7 +102,7 @@ const thumbnailObserver = new IntersectionObserver((entries) => {
   entries.forEach(entry => {
     const card = entry.target.closest('.page-card');
     if (!card || !card.dataset.pageId) return;
-    const pageItem = state.pages.find(p => p.id === card.dataset.pageId);
+    const pageItem = getPageItemForCard(card);
     const canvas = card.querySelector('.card-thumbnail-wrapper canvas');
     if (!pageItem || !canvas) return;
 
@@ -156,8 +156,8 @@ const thumbnailObserver = new IntersectionObserver((entries) => {
   });
 }, { rootMargin: '500px 0px 500px 0px' });
 
-// High-resolution preview LRU cache (capped at 12 pages for instant zero-reload browsing with low RAM)
-const previewCache = new LRUCache(12);
+// High-resolution preview LRU cache (capped at 6 pages: đủ cho trang hiện tại ±2, RAM thấp)
+const previewCache = new LRUCache(6);
 let currentModalRenderIndex = null;
 
 // DOM Elements
@@ -1068,8 +1068,9 @@ const btnSearchPrev = document.getElementById('btnSearchPrev');
 const btnSearchNext = document.getElementById('btnSearchNext');
 const btnSearchClear = document.getElementById('btnSearchClear');
 
-const pageTextCache = new Map(); // pageId -> trích xuất text (cache suốt phiên)
-const pageNormCache = new Map(); // pageId -> text đã chuẩn hóa không dấu (tính 1 lần, tìm kiếm dùng lại)
+// Text tìm kiếm: bounded LRU để tài liệu rất dài không giữ toàn bộ văn bản trong RAM.
+const pageTextCache = new LRUCache(300); // pageId -> trích xuất text
+const pageNormCache = new LRUCache(300); // pageId -> text đã chuẩn hóa không dấu
 const searchState = { query: '', hits: [], total: 0, cursor: -1 };
 let searchDebounce = null;
 let searchRunToken = 0;
@@ -1143,30 +1144,6 @@ function stepSearch(dir) {
   focusSearchHit();
 }
 
-let backgroundIndexingToken = 0;
-function startBackgroundTextIndexing() {
-  const currentToken = ++backgroundIndexingToken;
-  if (!('requestIdleCallback' in window)) return;
-
-  let pageIndex = 0;
-  function scheduleNext() {
-    window.requestIdleCallback((deadline) => {
-      if (currentToken !== backgroundIndexingToken) return;
-      while (pageIndex < state.pages.length && deadline.timeRemaining() > 5) {
-        const pageItem = state.pages[pageIndex++];
-        if (pageItem && !pageNormCache.has(pageItem.id)) {
-          getPageText(pageItem).catch(() => {});
-        }
-      }
-      if (pageIndex < state.pages.length && currentToken === backgroundIndexingToken) {
-        scheduleNext();
-      }
-    }, { timeout: 3000 });
-  }
-
-  scheduleNext();
-}
-
 async function runSearch() {
   if (!searchInput) return;
   const token = ++searchRunToken;
@@ -1198,8 +1175,8 @@ async function runSearch() {
   for (const p of state.pages) {
     if (token !== searchRunToken) return; // truy vấn mới hơn đã tới, bỏ lượt này
     // Dùng bản chuẩn hóa đã cache (tính 1 lần khi trích xuất) thay vì normalize lại mỗi lần gõ
-    let norm = pageNormCache.get(p.id);
-    if (norm === undefined) norm = normalizeText(await getPageText(p));
+    let norm = pageNormCache.has(p.id) ? pageNormCache.get(p.id) : null;
+    if (norm === null) norm = normalizeText(await getPageText(p));
     pages.push({ id: p.id, text: norm });
   }
   if (token !== searchRunToken) return;
@@ -1474,7 +1451,6 @@ async function loadProjectFile(file) {
     updateSelectionUI();
     renderGrid();
     renderGroupBar();
-    startBackgroundTextIndexing();
     showToast(`Đã khôi phục project: ${state.pages.length} trang từ ${newSourceIds.length} file!`, 'success');
   } catch (err) {
     console.error('Lỗi khi mở project:', err);
@@ -1606,6 +1582,103 @@ function restoreSnapshot(snapshot) {
 // Arrange: di chuyển trang đã chọn (không cần kéo thả)
 // ==========================================================================
 
+function prefersReducedMotion() {
+  return typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function captureCardRects() {
+  const rects = new Map();
+  pagesGrid.querySelectorAll('.page-card').forEach(card => {
+    rects.set(card.dataset.pageId, card.getBoundingClientRect());
+  });
+  return rects;
+}
+
+// Tra cứu trang theo index của thẻ (O(1)); fallback tìm theo id nếu index lệch.
+function getPageItemForCard(card) {
+  const idx = Number(card.dataset.index);
+  if (Number.isInteger(idx)) {
+    const pageItem = state.pages[idx];
+    if (pageItem && pageItem.id === card.dataset.pageId) return pageItem;
+  }
+  return state.pages.find(p => p.id === card.dataset.pageId) || null;
+}
+
+// FLIP: giữ vị trí cũ, để trình duyệt dựng bố cục mới rồi trượt thẻ về chỗ mới.
+function animateGridReflow(firstRects) {
+  if (prefersReducedMotion()) return;
+  pagesGrid.querySelectorAll('.page-card').forEach(card => {
+    if (typeof card.animate !== 'function') return;
+    const before = firstRects.get(card.dataset.pageId);
+    if (!before) return;
+    const after = card.getBoundingClientRect();
+    const dx = before.left - after.left;
+    const dy = before.top - after.top;
+    if (!dx && !dy) return;
+    card.animate(
+      [
+        { transform: `translate(${dx}px, ${dy}px)` },
+        { transform: 'translate(0, 0)' },
+      ],
+      { duration: 200, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+    );
+  });
+}
+
+function reindexGridCards(updateTitles) {
+  const allCards = pagesGrid.querySelectorAll('.page-card');
+  for (let i = 0; i < allCards.length; i++) {
+    const c = allCards[i];
+    c.dataset.index = i;
+    const badge = c.querySelector('.card-num-badge');
+    if (badge) badge.textContent = `#${i + 1}`;
+    if (updateTitles) {
+      const titleInput = c.querySelector('.card-title-input');
+      const pageObj = state.pages[i];
+      if (titleInput && pageObj && (!pageObj.title || pageObj.title.startsWith('#'))) {
+        pageObj.title = `#${i + 1}`;
+        titleInput.value = pageObj.title;
+      }
+    }
+  }
+}
+
+function flashMovedCards(ids) {
+  ids.forEach(id => {
+    const card = pagesGrid.querySelector(`.page-card[data-page-id="${id}"]`);
+    if (card) {
+      card.classList.remove('just-moved');
+      void card.offsetWidth;
+      card.classList.add('just-moved');
+      setTimeout(() => card.classList.remove('just-moved'), 750);
+    }
+  });
+}
+
+// Xóa thẻ khỏi lưới tại chỗ + FLIP cho các thẻ còn lại, tránh renderGrid toàn bộ.
+function removeCardsByIds(ids) {
+  const removeSet = new Set(ids);
+  if (removeSet.size === 0) return;
+  const firstRects = captureCardRects();
+  pagesGrid.querySelectorAll('.page-card').forEach(card => {
+    if (!removeSet.has(card.dataset.pageId)) return;
+    const wrapper = card.querySelector('.card-thumbnail-wrapper');
+    if (wrapper) { try { thumbnailObserver.unobserve(wrapper); } catch (e) { /* bỏ qua */ } }
+    const canvas = card.querySelector('canvas');
+    if (canvas && canvas._pdfRenderTask && typeof canvas._pdfRenderTask.cancel === 'function') {
+      try { canvas._pdfRenderTask.cancel(); } catch (e) { /* bỏ qua */ }
+      canvas._pdfRenderTask = null;
+    }
+    card.remove();
+  });
+  for (let i = thumbnailRenderQueue.length - 1; i >= 0; i--) {
+    if (!document.body.contains(thumbnailRenderQueue[i].canvas)) thumbnailRenderQueue.splice(i, 1);
+  }
+  reindexGridCards(true);
+  animateGridReflow(firstRects);
+}
+
 function moveSelectedPages(mode) {
   const selected = state.pages.filter(p => p.isSelected);
   if (selected.length === 0 || selected.length === state.pages.length) return;
@@ -1668,20 +1741,23 @@ function moveSelectedPages(mode) {
   }
 
   saveHistoryState();
+  const firstRects = captureCardRects();
   state.pages = arr;
-  renderGrid();
   updateSelectionUI();
 
-  // Nhấn nhá các thẻ vừa di chuyển
-  selected.forEach(p => {
-    const card = pagesGrid.querySelector(`.page-card[data-page-id="${p.id}"]`);
-    if (card) {
-      card.classList.remove('just-moved');
-      void card.offsetWidth;
-      card.classList.add('just-moved');
-      setTimeout(() => card.classList.remove('just-moved'), 750);
-    }
-  });
+  const cardsById = new Map();
+  pagesGrid.querySelectorAll('.page-card').forEach(card => cardsById.set(card.dataset.pageId, card));
+  if (arr.some(p => !cardsById.has(p.id))) {
+    renderGrid();
+  } else {
+    const fragment = document.createDocumentFragment();
+    arr.forEach(p => fragment.appendChild(cardsById.get(p.id)));
+    pagesGrid.appendChild(fragment);
+    reindexGridCards(true);
+    animateGridReflow(firstRects);
+  }
+
+  flashMovedCards(selected.map(p => p.id));
 
   const labels = { start: 'đầu danh sách', end: 'cuối danh sách', left: 'sang trái', right: 'sang phải' };
   const label = labels[mode] || (typeof mode === 'number' ? `vị trí #${mode + 1}` : '');
@@ -1767,10 +1843,11 @@ function setupToolbarEvents() {
 
     if (confirm(`Bạn có chắc chắn muốn xóa ${selectedCount} trang đã chọn?`)) {
       saveHistoryState();
+      const removedIds = state.pages.filter(p => p.isSelected).map(p => p.id);
       state.pages.filter(p => p.isSelected).forEach(p => { pageTextCache.delete(p.id); pageNormCache.delete(p.id); });
       state.pages = state.pages.filter(p => !p.isSelected);
       updateSelectionUI();
-      renderGrid();
+      removeCardsByIds(removedIds);
       renderGroupBar();
       showToast(`Đã xóa ${selectedCount} trang thành công`, 'success');
     }
@@ -1923,8 +2000,15 @@ function setupToolbarEvents() {
 
   // Global Keyboard Shortcuts (Ctrl+A, Delete, Ctrl+Z)
   window.addEventListener('keydown', (e) => {
-    const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
-    if (tag === 'input' || tag === 'textarea' || (document.activeElement && document.activeElement.isContentEditable)) {
+    const active = document.activeElement;
+    const tag = active ? active.tagName.toLowerCase() : '';
+    const inputType = tag === 'input' ? String(active.type || '').toLowerCase() : '';
+    const isTextEntry =
+      tag === 'textarea' ||
+      tag === 'select' ||
+      (active && active.isContentEditable) ||
+      (tag === 'input' && !['checkbox', 'radio', 'button', 'submit'].includes(inputType));
+    if (isTextEntry) {
       return;
     }
     if (workspaceContainer.style.display === 'none') return;
@@ -1978,6 +2062,34 @@ function setupToolbarEvents() {
         rotateSelectedPages();
       }
       return;
+    }
+
+    // ← / → : di chuyển trang đã chọn một bước (hoạt động cả khi focus ở checkbox)
+    // Home / End : đưa trang đã chọn về đầu / cuối danh sách
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+      const selectedCount = state.pages.filter(p => p.isSelected).length;
+      if (selectedCount > 0) {
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          moveSelectedPages('left');
+          return;
+        }
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          moveSelectedPages('right');
+          return;
+        }
+        if (e.key === 'Home') {
+          e.preventDefault();
+          moveSelectedPages('start');
+          return;
+        }
+        if (e.key === 'End') {
+          e.preventDefault();
+          moveSelectedPages('end');
+          return;
+        }
+      }
     }
 
     // Alt+← / Alt+→ : Di chuyển trang đã chọn
@@ -2567,17 +2679,11 @@ async function loadPdfFiles(files, isAppend = false) {
   }
   statFileSize.textContent = formatBytes(totalBytes);
 
-  uploadContainer.style.display = 'none';
-  workspaceContainer.style.display = 'block';
-  btnUploadNew.style.display = 'inline-flex';
-  btnExportPdf.style.display = 'inline-flex';
-  btnOpenCompressModal.style.display = 'inline-flex';
-  docStats.style.display = 'flex';
+  showWorkspaceUI();
 
   updateSelectionUI();
   renderGrid();
   renderGroupBar();
-  startBackgroundTextIndexing();
 
   if (isAppend) {
     showToast(`Đã thêm ${totalNewPages} trang từ ${loadedCount} tệp PDF vào tài liệu!`, 'success');
@@ -2782,7 +2888,7 @@ function rotateSelectedPages() {
   pagesGrid.querySelectorAll('.page-card').forEach(card => {
     const pid = card.dataset.pageId;
     if (!pid || !selectedIds.has(pid)) return;
-    const pageItem = state.pages.find(p => p.id === pid);
+    const pageItem = getPageItemForCard(card);
     if (!pageItem) return;
     const isSwapped = (pageItem.rotation / 90) % 2 !== 0;
     const dimTag = card.querySelector('.card-dim-tag');
@@ -2816,7 +2922,7 @@ function deleteSinglePage(card, curIdx) {
     pageNormCache.delete(removedItem.id);
   }
   updateSelectionUI();
-  renderGrid();
+  if (removedItem) removeCardsByIds([removedItem.id]);
   renderGroupBar();
   showToast(`Đã xóa trang #${curIdx + 1}`, 'success');
 }
@@ -2919,23 +3025,30 @@ function setupPagesGridDelegation() {
   const dragMarkerClasses = ['drag-over-left', 'drag-over-right', 'drag-over-top', 'drag-over-bottom'];
   let dragOverCard = null;
 
-  function reindexGridCards(updateTitles) {
-    const allCards = pagesGrid.querySelectorAll('.page-card');
-    for (let i = 0; i < allCards.length; i++) {
-      const c = allCards[i];
-      c.dataset.index = i;
-      const badge = c.querySelector('.card-num-badge');
-      if (badge) badge.textContent = `#${i + 1}`;
-      if (updateTitles) {
-        const titleInput = c.querySelector('.card-title-input');
-        const pageObj = state.pages[i];
-        if (titleInput && pageObj && (!pageObj.title || pageObj.title.startsWith('#'))) {
-          pageObj.title = `#${i + 1}`;
-          titleInput.value = pageObj.title;
-        }
-      }
+  // Tự cuộn khi kéo gần mép trên/dưới để sắp xếp tài liệu dài.
+  let autoScrollFrame = null;
+  let autoScrollDir = 0;
+  const stopAutoScroll = () => {
+    if (autoScrollFrame) cancelAnimationFrame(autoScrollFrame);
+    autoScrollFrame = null;
+    autoScrollDir = 0;
+  };
+  const autoScrollTick = () => {
+    if (!autoScrollDir) {
+      autoScrollFrame = null;
+      return;
     }
-  }
+    window.scrollBy(0, autoScrollDir * 14);
+    autoScrollFrame = requestAnimationFrame(autoScrollTick);
+  };
+  const updateAutoScroll = (clientY) => {
+    const edge = 90;
+    const dir = clientY < edge ? -1 : clientY > window.innerHeight - edge ? 1 : 0;
+    if (dir === autoScrollDir) return;
+    autoScrollDir = dir;
+    if (dir && !autoScrollFrame) autoScrollFrame = requestAnimationFrame(autoScrollTick);
+    if (!dir) stopAutoScroll();
+  };
 
   function clearDropMarker() {
     if (dragOverCard) dragOverCard.classList.remove(...dragMarkerClasses);
@@ -3001,6 +3114,7 @@ function setupPagesGridDelegation() {
     if (newOrder.every((page, index) => page.id === state.pages[index].id)) return false;
 
     saveHistoryState();
+    const firstRects = captureCardRects();
     state.pages = newOrder;
 
     const cardsById = new Map();
@@ -3014,19 +3128,8 @@ function setupPagesGridDelegation() {
       reindexGridCards(true);
     }
     updateSelectionUI();
+    animateGridReflow(firstRects);
     return true;
-  }
-
-  function flashMovedCards(ids) {
-    ids.forEach(id => {
-      const card = pagesGrid.querySelector(`.page-card[data-page-id="${id}"]`);
-      if (card) {
-        card.classList.remove('just-moved');
-        void card.offsetWidth;
-        card.classList.add('just-moved');
-        setTimeout(() => card.classList.remove('just-moved'), 750);
-      }
-    });
   }
 
   pagesGrid.addEventListener('dragstart', (e) => {
@@ -3075,6 +3178,7 @@ function setupPagesGridDelegation() {
   });
 
   pagesGrid.addEventListener('dragend', () => {
+    stopAutoScroll();
     pagesGrid.querySelectorAll('.page-card').forEach(c => {
       c.classList.remove('dragging', ...dragMarkerClasses);
     });
@@ -3093,6 +3197,7 @@ function setupPagesGridDelegation() {
     if (state.draggedIndex === null) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+    updateAutoScroll(e.clientY);
 
     const card = resolveDragCard(e);
     if (card && card.classList.contains('dragging')) {
@@ -3115,6 +3220,7 @@ function setupPagesGridDelegation() {
   });
 
   pagesGrid.addEventListener('drop', (e) => {
+    stopAutoScroll();
     if (state.draggedIndex === null) return;
     e.preventDefault();
     const card = resolveDragCard(e);
@@ -3396,10 +3502,10 @@ async function renderPageToCache(pageIndex) {
     page = await srcObj.pdfJsDoc.getPage(pageItem.pageIndex + 1);
     const rotation = (page.rotate + pageItem.rotation) % 360;
 
-    // Giới hạn scale thông minh: Tối đa 1920px để tránh ngốn bộ nhớ GPU/RAM trong Chrome
+    // Giới hạn scale thông minh: tối đa 1600px để tiết kiệm GPU/RAM, vẫn nét trên màn hình phổ thông
     const unscaledVp = page.getViewport({ scale: 1.0, rotation });
     const maxDim = Math.max(unscaledVp.width, unscaledVp.height);
-    const targetScale = Math.min(2.0, Math.max(1.2, 1920 / maxDim));
+    const targetScale = Math.min(2.0, Math.max(1.2, 1600 / maxDim));
     const viewport = page.getViewport({ scale: targetScale, rotation });
 
     const useOffscreen = typeof OffscreenCanvas !== 'undefined';
