@@ -170,20 +170,37 @@ func SplitAll(pdfPath, outDir string) ([]string, error) {
 		return nil, fmt.Errorf("lỗi đọc số trang: %w", err)
 	}
 
-	// Tách từng trang bằng CollectFile để kiểm soát chính xác tên file
-	var createdFiles []string
+	// Tách bằng SplitFile của pdfcpu: đọc/phân tích tệp nguồn đúng MỘT lần
+	// rồi ghi mọi trang (bản cũ gọi CollectFile cho từng trang — phân tích
+	// lại toàn bộ tệp N lần; thử nghiệm worker-pool song song còn chậm hơn
+	// trên máy ít nhân và tốn RAM hơn, đã loại bỏ — xem benchmark).
+	// SplitFile đặt tên <base>_<trang>.pdf trong thư mục tạm riêng, sau đó
+	// từng tệp được chuyển về tên đích <base>_page_<trang>.pdf qua
+	// saveSafely để giữ nguyên tắc ghi nguyên tử.
 	baseName := strings.TrimSuffix(filepath.Base(absIn), filepath.Ext(absIn))
+	splitBase := strings.TrimSuffix(filepath.Base(absIn), ".pdf")
 
+	tmpDir, err := os.MkdirTemp(absOut, ".split_*")
+	if err != nil {
+		return nil, fmt.Errorf("không thể tạo thư mục tạm để tách trang: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := api.SplitFile(absIn, tmpDir, 1, nil); err != nil {
+		return nil, fmt.Errorf("lỗi tách trang: %w", err)
+	}
+
+	createdFiles := make([]string, count)
 	for i := 1; i <= count; i++ {
+		part := filepath.Join(tmpDir, fmt.Sprintf("%s_%d.pdf", splitBase, i))
 		targetFile := filepath.Join(absOut, fmt.Sprintf("%s_page_%d.pdf", baseName, i))
-		pageStr := strconv.Itoa(i)
 		err := saveSafely(absIn, targetFile, func(tempTarget string) error {
-			return api.CollectFile(absIn, tempTarget, []string{pageStr}, nil)
+			return copyFile(part, tempTarget)
 		})
 		if err != nil {
 			return nil, fmt.Errorf("lỗi trích xuất trang %d: %w", i, err)
 		}
-		createdFiles = append(createdFiles, targetFile)
+		createdFiles[i-1] = targetFile
 	}
 
 	return createdFiles, nil
