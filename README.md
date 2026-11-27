@@ -219,7 +219,7 @@ Kết quả đo đạc thực tế trên Windows bằng `python benchmark.py` (t
 | **Đọc info file scan 10tr (1.1 MB ảnh)** | 762.7 ms | **83.6 ms** | **Go nhanh gấp ~9.1 lần** ⚡ |
 | **Nén lossless file scan (`compress`)** | 751 ms | **146 ms** | **Go nhanh gấp ~5.1 lần** ⚡ |
 | **Mức tiêu thụ RAM** | ~50 - 80 MB | **~8 - 15 MB** | **Go tiết kiệm 5x RAM** 💾 |
-| **Tính độc lập khi phân phối** | Cần cài Python + pip + lib | **1 file .exe duy nhất (~10MB)** | Không cần cài đặt bất kỳ runtime nào 📦 |
+| **Tính độc lập khi phân phối** | Cần cài Python + pip + lib | **1 file .exe duy nhất (~15 MB)** | Không cần cài đặt bất kỳ runtime nào 📦 |
 
 ---
 
