@@ -27,7 +27,7 @@ Từ lần sau Windows không hỏi nữa. Tệp do chính người tặng đưa
 ## Việc cần biết
 
 - Máy cần **Windows 10 trở lên**. Hầu hết máy dùng bản `amd64`; chỉ máy Windows chạy chip ARM (rất hiếm, ví dụ Surface Pro X) mới cần bản `arm64`.
-- Tính năng **chuyển Word/Excel sang PDF** cần máy có sẵn LibreOffice (miễn phí) hoặc chờ bản cập nhật dùng Microsoft Office — các tính năng PDF còn lại không cần gì thêm.
+- Tính năng **chuyển Word/Excel sang PDF** dùng Microsoft Office có sẵn trên máy của bạn, hoặc LibreOffice (miễn phí) nếu không có MS Office — các tính năng PDF còn lại không cần gì thêm.
 - PDF Craft **không gửi dữ liệu đi đâu cả**: không tài khoản, không theo dõi, xử lý 100% trên máy của bạn. Tệp gốc luôn được giữ an toàn — chương trình ghi ra tệp mới rồi mới thay thế, không bao giờ ghi đè nửa chừng.
 
 ## Gặp trục trặc?
