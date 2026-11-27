@@ -15,7 +15,7 @@ dependencies = ["pypdf>=6"]
 pdfcraft = "pdfcraft.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["python"]
+where = ["legacy/python"]
 
 [tool.pytest.ini_options]
-testpaths = ["python/tests"]
+testpaths = ["legacy/python/tests"]
