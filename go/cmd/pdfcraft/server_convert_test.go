@@ -198,6 +198,10 @@ func drainConvertSemaphore() {
 // workDir còn tồn tại trong lúc chạy, bị xóa sau khi handler return,
 // semaphore giữ đến cuối.
 func TestConvertSemaphoreHeldUntilConverterEnds(t *testing.T) {
+	// Runner CI không có LibreOffice: không có engine thì handler trả 501
+	// trước khi gọi converter, nên converter giả không bao giờ chạy.
+	// Dùng engine giả (pattern chung của file) để test kiểm tra đúng logic S9.
+	useFakeSoffice(t)
 	orig := convertOfficeToPdfFunc
 	defer func() { convertOfficeToPdfFunc = orig; drainConvertSemaphore() }()
 	drainConvertSemaphore()
@@ -261,6 +265,9 @@ func TestConvertSemaphoreHeldUntilConverterEnds(t *testing.T) {
 // TestConvertContextCancelStopsConverter (S9): client ngắt giữa chừng →
 // converter nhận hủy, handler return 504, semaphore được nhả.
 func TestConvertContextCancelStopsConverter(t *testing.T) {
+	// Xem ghi chú ở TestConvertSemaphoreHeldUntilConverterEnds: cần engine
+	// giả thì handler mới gọi tới converter giả trên runner không có LibreOffice.
+	useFakeSoffice(t)
 	orig := convertOfficeToPdfFunc
 	defer func() { convertOfficeToPdfFunc = orig; drainConvertSemaphore() }()
 	drainConvertSemaphore()
@@ -315,6 +322,9 @@ func TestConvertContextCancelStopsConverter(t *testing.T) {
 // TestConvertPanicRecovery (S9): converter panic → response 500, process sống,
 // semaphore được nhả.
 func TestConvertPanicRecovery(t *testing.T) {
+	// Xem ghi chú ở TestConvertSemaphoreHeldUntilConverterEnds: cần engine
+	// giả thì handler mới gọi tới converter giả trên runner không có LibreOffice.
+	useFakeSoffice(t)
 	orig := convertOfficeToPdfFunc
 	defer func() { convertOfficeToPdfFunc = orig; drainConvertSemaphore() }()
 	convertOfficeToPdfFunc = func(ctx context.Context, inputs []string, outDir, engine string, timeoutSec int) ([]string, error) {
