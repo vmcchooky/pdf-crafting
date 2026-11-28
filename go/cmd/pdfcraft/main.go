@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -143,13 +142,32 @@ type boolFlagValue interface {
 }
 
 // readPasswordLine đọc một dòng mật khẩu từ r, trim \r\n, reject rỗng (S12).
+// Đọc từng byte thay vì bufio.Reader: bufio có thể đọc trước (read-ahead) và
+// nuốt mất dòng mật khẩu thứ hai khi encrypt dùng cả --user-pw-stdin lẫn
+// --owner-pw-stdin trên cùng os.Stdin.
 func readPasswordLine(r io.Reader) (string, error) {
-	line, err := bufio.NewReader(r).ReadString('\n')
-	if err != nil && line == "" {
-		return "", fmt.Errorf("không đọc được mật khẩu từ stdin: %w", err)
+	var b strings.Builder
+	buf := make([]byte, 1)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			if buf[0] == '\n' {
+				break
+			}
+			b.WriteByte(buf[0])
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", fmt.Errorf("không đọc được mật khẩu từ stdin: %w", err)
+		}
 	}
-	pw := strings.TrimRight(line, "\r\n")
+	pw := strings.TrimRight(b.String(), "\r")
 	if pw == "" {
+		if b.Len() == 0 {
+			return "", fmt.Errorf("không đọc được mật khẩu từ stdin: %w", io.EOF)
+		}
 		return "", fmt.Errorf("mật khẩu từ stdin rỗng")
 	}
 	return pw, nil

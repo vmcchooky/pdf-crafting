@@ -32,6 +32,22 @@ func TestReadPasswordLine(t *testing.T) {
 	}
 }
 
+// TestReadPasswordLinesSharedStdin (S12 regression): hai lần đọc liên tiếp
+// trên cùng một stdin (encrypt --user-pw-stdin --owner-pw-stdin) không được
+// làm mất dòng thứ hai. Bản cũ tạo bufio.Reader mới mỗi lần nên lần đọc đầu
+// đã read-ahead nuốt cả dòng thứ hai.
+func TestReadPasswordLinesSharedStdin(t *testing.T) {
+	r := strings.NewReader("user-pw\r\nowner-pw\n")
+	user, err := readPasswordLine(r)
+	if err != nil || user != "user-pw" {
+		t.Fatalf("dòng 1: pw = %q, err = %v", user, err)
+	}
+	owner, err := readPasswordLine(r)
+	if err != nil || owner != "owner-pw" {
+		t.Fatalf("dòng 2 bị mất do read-ahead: pw = %q, err = %v", owner, err)
+	}
+}
+
 func TestResolvePasswordFlag(t *testing.T) {
 	// Cả hai cùng set → lỗi rõ ràng.
 	if _, err := resolvePasswordFlag("x", true, strings.NewReader("y\n")); err == nil {
@@ -135,6 +151,14 @@ func TestPasswordStdinCLI(t *testing.T) {
 	// encrypt qua stdin (bool flag đứng trước file — kiểm tra parseFlagsAndArgs).
 	if out, code := run("secret123\n", "encrypt", "--user-pw-stdin", plain, "-o", enc); code != 0 {
 		t.Fatalf("encrypt --user-pw-stdin: exit %d: %s", code, out)
+	}
+	// S12 regression: user + owner password, hai dòng trên cùng stdin.
+	enc2 := filepath.Join(dir, "enc2.pdf")
+	if out, code := run("userpw\nownerpw\n", "encrypt", "--user-pw-stdin", "--owner-pw-stdin", plain, "-o", enc2); code != 0 {
+		t.Fatalf("encrypt 2 dòng stdin: exit %d: %s", code, out)
+	}
+	if out, code := run("userpw\n", "info", enc2, "--password-stdin"); code != 0 || !strings.Contains(out, "Tổng số trang") {
+		t.Fatalf("info enc2 với user pw: exit %d: %s", code, out)
 	}
 	// info qua stdin.
 	out, code := run("secret123\n", "info", enc, "--password-stdin")

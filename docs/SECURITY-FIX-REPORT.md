@@ -392,6 +392,13 @@
   stdin không phải terminal → exit 1 + hướng dẫn).
   **Lưu ý test:** `main()` không arg chạy Web UI server và không thoát — lần
   đầu test help gọi binary không arg nên treo (đã sửa test dùng `--help`).
+  **Follow-up (28/11):** `readPasswordLine` trước đây dùng `bufio.NewReader`
+  — bufio đọc trước (read-ahead) trên cùng `os.Stdin`, khi `encrypt` dùng cả
+  `--user-pw-stdin` lẫn `--owner-pw-stdin` thì dòng owner-pw bị nuốt mất
+  (reader thứ hai thấy EOF). Đổi sang đọc byte-by-byte (`r.Read(buf[0:1])`)
+  không buffer giữa các lần gọi: mỗi lần gọi đọc đúng một dòng từ vị trí
+  hiện tại của stream. Test thêm: đọc hai dòng liên tiếp trên cùng reader,
+  cả hai dòng đều nhận đủ.
 - **Chưa kiểm tra:** prompt tương tác thật trên terminal (chỉ kiểm tra nhánh
   non-terminal trong test; nhánh `term.ReadPassword` chưa chạy thật — cần Rio
   kiểm tra trên Windows terminal khi chạy `decrypt`/`encrypt` không flag).
@@ -622,6 +629,11 @@
   `pkg/pdfcraft` 10.8s); `go vet ./...` pass; `gofmt -l`: không output;
   smoke binary thật (đủ 7 header, loader 200, không inline script).
   Playwright: KHÔNG chạy được trên VM này (xem §2 S15).
+- Follow-up S12 (28/11, máy Windows): `go vet ./...` pass; nội dung index
+  gofmt sạch; `go test ./cmd/pdfcraft/ ./pkg/pdfcraft/` pass (22.4s + 11.7s,
+  gồm test đọc 2 dòng stdin liên tiếp). Lưu ý môi trường: `gofmt -l .` trên
+  Windows flag file chưa sửa do `core.autocrlf=true` (working tree CRLF),
+  CI checkout LF nên sạch — không chạy `gofmt -w`.
 
 **Bộ test cuối đợt (sau S15, trước khi mở PR):**
 - `cd go; gofmt -w .` → sạch (`gofmt -l` không output); `go vet ./...` pass;
