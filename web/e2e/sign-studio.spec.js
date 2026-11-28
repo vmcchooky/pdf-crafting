@@ -436,7 +436,23 @@ test.describe('Sign Studio redesign', () => {
       const panel = document.querySelector('.sign-panel-scroll').getBoundingClientRect();
       const preview = document.querySelector('#penColorPicker .write-color-preview').getBoundingClientRect();
       return preview.top >= panel.top && preview.bottom <= panel.bottom;
-    })).toBe(true);
+    }), {
+      // Chẩn đoán CI-only: in rect thô khi predicate không đạt trong 5s.
+      message: 'pen palette preview phải nằm trong panel dọc — rect: ' +
+        JSON.stringify(await page.evaluate(() => {
+          const panel = document.querySelector('.sign-panel-scroll').getBoundingClientRect();
+          const preview = document.querySelector('#penColorPicker .write-color-preview').getBoundingClientRect();
+          const panelStyle = getComputedStyle(document.querySelector('.sign-panel-scroll'));
+          return {
+            panel: { top: panel.top, bottom: panel.bottom, height: panel.height },
+            preview: { top: preview.top, bottom: preview.bottom, height: preview.height },
+            panelScrollHeight: document.querySelector('.sign-panel-scroll').scrollHeight,
+            panelClientHeight: document.querySelector('.sign-panel-scroll').clientHeight,
+            panelOverflowY: panelStyle.overflowY,
+            bodyFontSize: getComputedStyle(document.body).fontSize,
+          };
+        })),
+    }).toBe(true);
     const metrics = await page.evaluate(() => {
       const panel = document.querySelector('.sign-panel-scroll');
       const palette = document.querySelector('#penColorPicker details');
