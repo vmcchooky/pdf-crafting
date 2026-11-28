@@ -710,4 +710,29 @@
   Playwright/Chromium xem log job `web` trên GitHub. Job `web` đỏ chặn
   merge dù `go`/`go-sec` có xanh lại.
 
-### Lần 2 — (đang chờ CI chạy lại sau push fix gosec)
+### Lần 2 — run 46127210810, head `2f8c69a` (28/11 08:44 UTC): 4 xanh / 2 đỏ
+- Xanh: `web-sync`, `qpdf`, `bench`, **`go-sec` ✅ (fix gosec có tác dụng)**.
+- Đỏ: `go`, `web` → **KHÔNG merge**.
+- `go` vẫn đỏ dù đã sửa gosec + nới cửa sổ timing. Nguyên nhân chưa xác
+  định được: chạy đúng Go CI (1.26.11) local — `gofmt`, `go build`, `go vet`,
+  `go test -race` (cmd 26.2s, pkg 19.4s), cross-build Windows amd64 +
+  arm64 (`CGO_ENABLED=0`), `GOOS=windows go vet` đều pass; stress
+  `go test -race -count=5` pass cả 2 package; test semaphore pass 3 lần
+  trên 1 CPU. Link job lỗi có fragment `#step:4:36` (step 4 = cross-build
+  hoặc step test, tùy cách đếm "Set up job") — không đủ kết luận. Log job
+  CI không lấy được: GitHub MCP không có tool tải log; trang job trên web
+  chỉ hiện annotation "Process completed with exit code 1"; lần thử mở
+  trang job qua browser bị lỗi mạng. Cần người có quyền đọc log Actions
+  (hoặc `gh run view --log`) mở log job `go` của run 46127210810 để biết
+  step/test nào fail rồi mới sửa tiếp — không sửa mò thêm.
+- `web` vẫn đỏ (lỗi có sẵn từ base, xem lần 1). Job này chặn merge dù
+  `go`/`go-sec` có xanh lại.
+
+### Kết luận merge (28/11, sau lần 2)
+- **CHƯA MERGE.** CI chưa xanh hết: `go` + `web` đỏ tại head `2f8c69a`.
+  Theo quy tắc merge đã giao, dừng lại và báo cáo PR + link CI để xử lý
+  tiếp cùng Rio. PR: https://github.com/vmcchooky/pdf-crafting/pull/16 —
+  CI: https://github.com/vmcchooky/pdf-crafting/actions/runs/46127210810
+- Lưu ý kỹ thuật: lần push fix gosec tạo 2 commit remote cùng nội dung
+  (`51fdc00` 08:44:16Z rồi `2f8c69a` 08:44:22Z — `push-files` dường như
+  retry nội bộ); head PR là `2f8c69a`, nội dung đúng 37 file.
