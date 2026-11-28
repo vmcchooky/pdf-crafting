@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PDF Craft - Công cụ chỉnh sửa & sắp xếp trang PDF chuyên nghiệp</title>
   <meta name="description" content="Trình biên tập PDF trực quan, mượt mà: kéo thả đổi thứ tự trang, chèn trang từ tệp khác, xóa trang và trích xuất PDF tốc độ cao.">
-  <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="app.css?v=2.7">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="alternate icon" type="image/x-icon" href="favicon.ico">
+  <link rel="stylesheet" href="app.css?v=2.11">
   <style>
     .search-group { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--border-subtle); border-radius: 8px; }
     .search-group svg { color: var(--text-muted); flex-shrink: 0; }
@@ -203,28 +204,28 @@
               Đảo ngược thứ tự
             </button>
 
-            <div class="arrange-group" role="group" aria-label="Di chuyển trang đã chọn">
-              <button class="btn btn-tool btn-icon-only" id="btnMoveStart" disabled title="Đưa trang đã chọn lên đầu (Home)">
+            <div class="arrange-group" role="group" aria-label="Di chuyển khối trang đã chọn">
+              <button class="btn btn-tool btn-icon-only" id="btnMoveStart" disabled title="Đưa khối trang đã chọn lên đầu (Home)" aria-label="Đưa khối trang đã chọn lên đầu">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="18 17 11 10 18 3"></polyline><line x1="6" y1="19" x2="6" y2="5"></line>
                 </svg>
               </button>
-              <button class="btn btn-tool btn-icon-only" id="btnMoveLeft" disabled title="Di chuyển trang đã chọn sang trái (←)">
+              <button class="btn btn-tool btn-icon-only" id="btnMoveLeft" disabled title="Di chuyển khối trang đã chọn sang trái (←)" aria-label="Di chuyển khối trang đã chọn sang trái">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>
                 </svg>
               </button>
-              <button class="btn btn-tool btn-icon-only" id="btnMoveRight" disabled title="Di chuyển trang đã chọn sang phải (→)">
+              <button class="btn btn-tool btn-icon-only" id="btnMoveRight" disabled title="Di chuyển khối trang đã chọn sang phải (→)" aria-label="Di chuyển khối trang đã chọn sang phải">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline>
                 </svg>
               </button>
-              <button class="btn btn-tool btn-icon-only" id="btnMoveEnd" disabled title="Đưa trang đã chọn xuống cuối (End)">
+              <button class="btn btn-tool btn-icon-only" id="btnMoveEnd" disabled title="Đưa khối trang đã chọn xuống cuối (End)" aria-label="Đưa khối trang đã chọn xuống cuối">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="6 3 13 10 6 17"></polyline><line x1="18" y1="5" x2="18" y2="19"></line>
                 </svg>
               </button>
-              <button class="btn btn-tool btn-icon-only" id="btnMoveToPos" disabled title="Chuyển trang đã chọn tới vị trí số…">
+              <button class="btn btn-tool btn-icon-only" id="btnMoveToPos" disabled title="Chuyển khối trang đã chọn tới vị trí bắt đầu số…" aria-label="Chuyển khối trang đã chọn tới vị trí bắt đầu số">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="14" y2="15"></line><polyline points="16 3 20 7 16 11"></polyline>
                 </svg>
@@ -404,7 +405,7 @@
               <line x1="12" y1="16" x2="12" y2="12"></line>
               <line x1="12" y1="8" x2="12.01" y2="8"></line>
             </svg>
-            <span>Kéo thẻ để đổi thứ tự. Chọn nhiều trang rồi dùng <strong>←/→</strong> hoặc <strong>Home/End</strong> (hay nút <strong>Di chuyển</strong>) để sắp xếp không cần kéo.</span>
+            <span>Kéo thẻ để đổi thứ tự. Chọn nhiều trang rồi dùng <strong>←/→</strong> hoặc <strong>Home/End</strong>; các trang đã chọn sẽ gom thành một khối.</span>
           </div>
           <div class="shortcut-pills">
             <span class="shortcut-badge"><kbd>Shift+Click</kbd> Chọn dải</span>
@@ -429,7 +430,7 @@
                     <circle cx="3" cy="9.5" r="1"></circle><circle cx="9" cy="9.5" r="1"></circle>
                   </svg>
                 </span>
-                <input type="checkbox" class="custom-checkbox" data-action="select-card">
+                <input type="checkbox" class="custom-checkbox" data-action="select-card" aria-label="Chọn trang">
                 <span class="card-num-badge"></span>
               </div>
               <div class="card-header-actions">
@@ -500,14 +501,16 @@
     </main>
 
     <!-- Fullscreen Preview Modal -->
-    <div class="modal" id="previewModal" role="dialog" aria-modal="true" aria-label="Xem trước trang PDF" aria-hidden="true" inert>
+    <div class="modal preview-modal" id="previewModal" role="dialog" aria-modal="true" aria-label="Xem trước trang PDF" aria-hidden="true" inert>
       <div class="modal-backdrop" id="modalBackdrop"></div>
-      <div class="modal-content">
+      <div class="modal-content" tabindex="-1" data-dialog-initial-focus>
         <div class="modal-header">
-          <div class="modal-header-left">
+          <div class="modal-header-left preview-header-left">
             <span class="modal-num-badge" id="modalPageNumBadge">#1</span>
-            <input type="text" class="modal-title-input" id="modalTitleInput" placeholder="Đặt tên cho trang này..." title="Nhấp để đổi tên trang">
-            <span class="modal-page-info" id="modalPageInfo"></span>
+            <div class="preview-title-card">
+              <input type="text" class="modal-title-input" id="modalTitleInput" placeholder="Đặt tên cho trang này..." title="Nhấp để đổi tên trang">
+              <span class="preview-title-meta" id="modalPageInfo"></span>
+            </div>
           </div>
           <div class="modal-header-actions">
             <button class="btn btn-tool" id="modalPrevPage" title="Trang trước (Phím mũi tên trái)">
@@ -520,7 +523,13 @@
                 <polyline points="9 18 15 12 9 6"></polyline>
               </svg>
             </button>
-            <button class="btn btn-tool btn-accent" id="modalOpenTab" title="Mở trang này trong tab mới với trình đọc PDF">
+            <button class="btn btn-tool" id="modalRotatePage" title="Xoay trang 90° (R)" aria-label="Xoay trang 90°">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+              </svg>
+              <span>Xoay</span>
+            </button>
+            <button class="btn btn-tool btn-accent" id="modalOpenTab" title="Mở trang này trong tab mới với trình đọc PDF" aria-label="Mở tab mới">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                 <polyline points="15 3 21 3 21 9"></polyline>
@@ -528,7 +537,7 @@
               </svg>
               <span>Mở tab mới</span>
             </button>
-            <button class="btn btn-tool btn-primary" id="modalSignThisPage" title="Ký hoặc đóng dấu lên trang này">
+            <button class="btn btn-tool btn-primary" id="modalSignThisPage" title="Ký hoặc đóng dấu lên trang này" aria-label="Ký trang này">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
                 <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
@@ -544,12 +553,28 @@
             </button>
           </div>
         </div>
-        <div class="modal-body">
+        <div class="modal-body preview-body">
           <div class="modal-spinner" id="modalSpinner" style="display: none;">
             <div class="spinner-icon"></div>
             <span>Đang tải trang sắc nét...</span>
           </div>
-          <canvas id="modalCanvas"></canvas>
+          <div class="preview-stage" id="previewStage">
+            <div class="preview-canvas-sizer" id="previewCanvasSizer">
+              <canvas id="modalCanvas"></canvas>
+            </div>
+          </div>
+          <div class="preview-zoom-bar" role="toolbar" aria-label="Thu phóng xem trước">
+            <button type="button" class="btn btn-tool btn-icon-only" id="previewZoomOut" title="Thu nhỏ (−)" aria-label="Thu nhỏ">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </button>
+            <span class="preview-zoom-label" id="previewZoomLabel" aria-live="polite">Vừa trang</span>
+            <button type="button" class="btn btn-tool btn-icon-only" id="previewZoomIn" title="Phóng to (+)" aria-label="Phóng to">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </button>
+            <button type="button" class="btn btn-tool btn-icon-only" id="previewZoomFit" title="Vừa trang (0)" aria-label="Vừa trang">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -679,9 +704,9 @@
                 <span>Cân bằng</span>
                 <span class="help-tip" data-tooltip="DPI 150, Chất lượng 75%, giữ nguyên màu. Cân bằng tối ưu kích thước và độ nét.">?</span>
               </button>
-              <button type="button" class="btn btn-tool btn-sm active" id="presetMaxCompress" data-tooltip="DPI 96, Chất lượng 40%, thang xám. Dung lượng siêu nhỏ cho tệp nhẹ nhất.">
+              <button type="button" class="btn btn-tool btn-sm active" id="presetMaxCompress" data-tooltip="DPI 96, Chất lượng 40%, giữ nguyên màu. Dung lượng nhỏ cho tệp nhẹ; bật thang xám thủ công nếu cần nhỏ hơn.">
                 <span>Nén tối đa</span>
-                <span class="help-tip" data-tooltip="DPI 96, Chất lượng 40%, thang xám. Dung lượng siêu nhỏ cho tệp nhẹ nhất.">?</span>
+                <span class="help-tip" data-tooltip="DPI 96, Chất lượng 40%, giữ nguyên màu. Dung lượng nhỏ cho tệp nhẹ; bật thang xám thủ công nếu cần nhỏ hơn.">?</span>
               </button>
               <button type="button" class="btn btn-tool btn-sm" id="presetHighQuality" data-tooltip="DPI 300, Chất lượng 90%, giữ nguyên màu. Thích hợp cho in ấn và trình chiếu chất lượng cao.">
                 <span>Nét cao</span>
@@ -785,7 +810,7 @@
               </label>
 
               <label class="adv-opt-label">
-                <input type="checkbox" id="optGrayscale" class="custom-checkbox" checked>
+                <input type="checkbox" id="optGrayscale" class="custom-checkbox">
                 <span>Chuyển sang thang xám</span>
                 <span class="help-tip" data-tooltip="Chuyển toàn bộ hình ảnh sang đen trắng / đơn sắc, loại bỏ 2 kênh màu giúp giảm thêm tới 30-40% dung lượng.">?</span>
               </label>
@@ -868,7 +893,7 @@
     </div>
 
     <!-- Digital Signature & Stamp Placement Studio Modal -->
-    <div class="modal modal-xl" id="signModal" role="dialog" aria-modal="true" aria-labelledby="signModalTitle" aria-describedby="signVisualSignatureNote" aria-hidden="true" inert>
+    <div class="modal modal-xl" id="signModal" role="dialog" aria-modal="true" aria-labelledby="signModalTitle" aria-hidden="true" inert>
       <div class="modal-backdrop" id="signModalBackdrop"></div>
       <div class="modal-content sign-studio-content">
         <div class="modal-header">
@@ -892,8 +917,6 @@
             </button>
           </div>
         </div>
-
-        <p class="sign-visual-signature-note" id="signVisualSignatureNote">Chữ ký và con dấu ở đây là hình ảnh chèn vào PDF, không phải chữ ký số có chứng thư để xác thực.</p>
 
         <div class="sign-studio-body">
           <!-- Vertical tool rail -->
@@ -929,6 +952,17 @@
               </span>
               <span class="sign-rail-label">Dấu VĐ</span>
             </button>
+            <button type="button" class="sign-rail-btn" data-tab="write" id="tabWrite" role="tab" aria-selected="false" aria-controls="paneWrite" tabindex="-1" title="Thêm hình, chữ và nét vẽ lên trang">
+              <span class="sign-rail-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+                  <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+                  <path d="M2 2l7.586 7.586"></path>
+                  <circle cx="11" cy="11" r="2"></circle>
+                </svg>
+              </span>
+              <span class="sign-rail-label">Viết &amp; vẽ</span>
+            </button>
           </div>
 
           <!-- Tool panel -->
@@ -961,7 +995,6 @@
                     </div>
                     <button type="button" class="btn-text-danger" id="btnClearStampLibrary" title="Xóa tất cả con dấu trong thư viện">Xóa thư viện</button>
                   </div>
-                  <p class="sign-hint">Nhấp thẻ để chọn, rồi bấm “Đưa lên trang” — hoặc bấm “Dùng dấu” ngay trên thẻ.</p>
                   <div class="stamp-library-grid" id="stampLibraryGrid">
                     <div class="stamp-lib-empty">Chưa có ảnh nào — tải dấu công ty, chức danh hoặc chữ ký scan để dùng lại.</div>
                   </div>
@@ -1027,7 +1060,7 @@
                     <button type="button" class="btn btn-tool btn-sm" id="btnSaveOfficialToLib" title="Lưu mẫu con dấu này vào thư viện để dùng lại">💾 Lưu</button>
                   </div>
                   <div class="official-stamp-display" id="officialStampDisplay">
-                    <div class="official-stamp-box official-border-single" id="officialStampBox" style="color: #c81e1e; border-color: #c81e1e;">
+                    <div class="official-stamp-box official-border-single" id="officialStampBox" style="color: #c81e1e; border-color: #c81e1e; border-radius: 0;">
                       <div class="official-stamp-title" id="previewOfficialTitle">GIÁM ĐỐC</div>
                       <div class="official-stamp-name" id="previewOfficialName">NGUYỄN VĂN AN</div>
                       <div class="official-stamp-extra" id="previewOfficialExtra" style="display: none;"></div>
@@ -1043,31 +1076,14 @@
                     <div class="official-presets-list">
                       <button type="button" class="btn-preset-chip active" data-preset="title_name">Chức danh + Tên</button>
                       <button type="button" class="btn-preset-chip" data-preset="name_only">Dấu tên 1 dòng</button>
-                      <button type="button" class="btn-preset-chip" data-preset="business_tax">Dấu vuông MST</button>
-                      <button type="button" class="btn-preset-chip" data-preset="round_stamp">Dấu tròn nội bộ</button>
                     </div>
-                    <div class="official-preset-group-label">Tài chính &amp; Kho vận</div>
-                    <div class="official-presets-list">
-                      <button type="button" class="btn-preset-chip" data-preset="paid">ĐÃ THU TIỀN</button>
-                      <button type="button" class="btn-preset-chip" data-preset="cash_out">ĐÃ CHI TIỀN</button>
-                      <button type="button" class="btn-preset-chip" data-preset="invoice_paid">ĐÃ THANH TOÁN</button>
-                      <button type="button" class="btn-preset-chip" data-preset="stock_in">ĐÃ NHẬP KHO</button>
-                      <button type="button" class="btn-preset-chip" data-preset="stock_out">ĐÃ XUẤT KHO</button>
-                      <button type="button" class="btn-preset-chip" data-preset="void">HỦY (VOID)</button>
-                    </div>
-                    <div class="official-preset-group-label">Hành chính &amp; Duyệt</div>
+                    <div class="official-preset-group-label">Hành chính</div>
                     <div class="official-presets-list">
                       <button type="button" class="btn-preset-chip" data-preset="copy">SAO Y BẢN CHÍNH</button>
                       <button type="button" class="btn-preset-chip" data-preset="duplicate">BẢN SAO</button>
-                      <button type="button" class="btn-preset-chip" data-preset="doc_incoming">CÔNG VĂN ĐẾN</button>
-                      <button type="button" class="btn-preset-chip" data-preset="secret">MẬT / HỎA TỐC</button>
-                      <button type="button" class="btn-preset-chip" data-preset="checked">ĐÃ ĐỐI CHIẾU</button>
-                      <button type="button" class="btn-preset-chip" data-preset="approved">GIÁM ĐỐC ĐÃ DUYỆT</button>
-                      <button type="button" class="btn-preset-chip" data-preset="phone">BÁN HÀNG QUA ĐT</button>
                     </div>
                   </div>
                 </div>
-
                 <div class="sign-section">
                   <div class="form-group" id="groupOfficialTitle">
                     <label class="form-label" for="stampOfficialTitle" id="lblOfficialTitle">Chức danh / Dòng trên (In hoa):</label>
@@ -1104,7 +1120,6 @@
                     <select id="stampBorderType" class="form-select">
                       <option value="single" selected>Viền đơn (Chuẩn)</option>
                       <option value="double">Viền kép đôi</option>
-                      <option value="rounded">Bo góc tròn</option>
                       <option value="round">Dấu tròn 2 vòng</option>
                       <option value="none">Không viền</option>
                     </select>
@@ -1121,6 +1136,12 @@
                   </div>
                 </div>
 
+                <div class="sign-section official-radius-row">
+                  <label class="form-label" for="rngOfficialRadius">Bo góc</label>
+                  <input type="range" id="rngOfficialRadius" min="0" max="24" step="1" value="0">
+                  <span id="lblOfficialRadius" class="sign-opacity-val">0px</span>
+                </div>
+
                 <div class="sign-section sign-official-toggles">
                   <label class="form-checkbox sign-inline-check" title="Tạo hiệu ứng mực xốp ngấm vào sợi giấy như đóng mộc thật">
                     <input type="checkbox" id="chkOfficialGrunge" checked>
@@ -1130,6 +1151,83 @@
                     <label for="rngOfficialAngle" title="Xoay nhẹ con dấu như đóng tay ngoài đời">Nghiêng</label>
                     <input type="range" id="rngOfficialAngle" min="-3" max="3" step="0.5" value="0">
                     <span id="lblOfficialAngle">0°</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Pane: Viết & vẽ -->
+              <div class="sign-tab-content" id="paneWrite" role="tabpanel" aria-labelledby="tabWrite" tabindex="0" style="display: none;">
+                <div class="sign-section">
+                  <div class="sign-section-title">Công cụ</div>
+                  <div class="write-tool-switch" role="tablist" aria-label="Công cụ viết và vẽ">
+                    <button type="button" class="btn btn-tool btn-sm active" data-write-tool="shape" id="toolShape">Hình</button>
+                    <button type="button" class="btn btn-tool btn-sm" data-write-tool="text" id="toolText">Chữ</button>
+                    <button type="button" class="btn btn-tool btn-sm" data-write-tool="pen" id="toolPen">Bút</button>
+                  </div>
+                </div>
+
+                <div class="sign-section write-tool-panel" id="writeShapePanel">
+                  <div class="form-group">
+                    <label class="form-label">Màu viền</label>
+                    <div class="write-color-control" id="shapeColorPicker"></div>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-checkbox sign-inline-check"><input type="checkbox" id="chkShapeFill"> <span>Có nền</span></label>
+                    <div class="write-color-control" id="shapeFillPicker" style="display: none;"></div>
+                  </div>
+                  <div class="sign-angle-row">
+                    <label for="rngShapeBorder">Độ dày viền</label>
+                    <input type="range" id="rngShapeBorder" min="1" max="12" value="3">
+                    <span id="lblShapeBorder" class="sign-opacity-val">3px</span>
+                  </div>
+                  <div class="sign-angle-row">
+                    <label for="rngShapeRadius">Bo góc</label>
+                    <input type="range" id="rngShapeRadius" min="0" max="40" value="6">
+                    <span id="lblShapeRadius" class="sign-opacity-val">6px</span>
+                  </div>
+                  <button type="button" class="btn btn-primary" id="btnAddShape">Thêm hình</button>
+                </div>
+
+                <div class="sign-section write-tool-panel" id="writeTextPanel" style="display: none;">
+                  <div class="form-group">
+                    <label class="form-label" for="writeTextInput">Nội dung</label>
+                    <textarea id="writeTextInput" class="form-input" rows="2" maxlength="200" placeholder="Nhập chữ cần thêm..."></textarea>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="writeFontSelect">Font chữ</label>
+                    <select id="writeFontSelect" class="form-select">
+                      <option value="Arial, sans-serif" selected>Arial</option>
+                      <option value="'Times New Roman', serif">Times New Roman</option>
+                      <option value="'Segoe UI', sans-serif">Segoe UI</option>
+                      <option value="Georgia, serif">Georgia</option>
+                      <option value="'Courier New', monospace">Courier New</option>
+                    </select>
+                  </div>
+                  <div class="sign-angle-row">
+                    <label for="rngWriteFontSize">Cỡ chữ</label>
+                    <input type="range" id="rngWriteFontSize" min="10" max="72" value="24">
+                    <span id="lblWriteFontSize" class="sign-opacity-val">24pt</span>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Màu chữ</label>
+                    <div class="write-color-control" id="writeTextColorPicker"></div>
+                  </div>
+                  <button type="button" class="btn btn-primary" id="btnAddText">Thêm chữ</button>
+                </div>
+
+                <div class="sign-section write-tool-panel" id="writePenPanel" style="display: none;">
+                  <div class="form-group">
+                    <label class="form-label">Màu bút</label>
+                    <div class="write-color-control" id="penColorPicker"></div>
+                  </div>
+                  <div class="sign-angle-row">
+                    <label for="rngPenWidth">Độ dày nét</label>
+                    <input type="range" id="rngPenWidth" min="1" max="16" value="3">
+                    <span id="lblPenWidth" class="sign-opacity-val">3px</span>
+                  </div>
+                  <div class="dialog-actions">
+                    <button type="button" class="btn btn-tool" id="btnUndoStroke">Xóa nét cuối</button>
+                    <button type="button" class="btn btn-tool btn-danger" id="btnClearStrokes">Xóa tất cả nét</button>
                   </div>
                 </div>
               </div>
@@ -1156,7 +1254,6 @@
                   <span class="sign-stamp-badge" id="signStampCountBadge">0 dấu</span>
                 </div>
                 <div class="sign-stamps-list" id="signStampsList">
-                  <div class="sign-empty-hint">Chưa có chữ ký hoặc con dấu nào trên trang này.</div>
                 </div>
                 <button type="button" class="btn btn-tool btn-danger btn-sm" id="btnClearPageStamps" style="display: none;">
                   Xóa tất cả dấu trên trang này
@@ -1219,15 +1316,6 @@
             </div>
 
             <div class="sign-stage-viewport" id="signStageViewport">
-                <div class="sign-stage-empty" id="signStageEmptyHint" hidden>
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-                    <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
-                    <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
-                    <path d="M2 2l7.586 7.586"></path>
-                  </svg>
-                  <strong>Trang này chưa có chữ ký / con dấu</strong>
-                  <span>Chọn công cụ bên trái → bấm “Đưa lên trang” (hoặc Enter) để đặt dấu đầu tiên.</span>
-                </div>
                 <div class="stamp-floating-toolbar" id="stampFloatingToolbar" style="display: none;">
                 <button type="button" class="stamp-float-btn" id="btnFloatRotZero" title="Đặt lại góc thẳng 0°">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><polyline points="3 3 3 8 8 8"></polyline></svg>
@@ -1236,6 +1324,14 @@
                 <button type="button" class="stamp-float-btn" id="btnFloatDuplicate" title="Nhân bản con dấu (Ctrl+D)">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                   <span>Nhân bản</span>
+                </button>
+                <button type="button" class="stamp-float-btn" id="btnFloatBackward" title="Đưa xuống dưới một lớp">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  <span>Xuống</span>
+                </button>
+                <button type="button" class="stamp-float-btn" id="btnFloatForward" title="Đưa lên trên một lớp">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 15 12 9 18 15"></polyline></svg>
+                  <span>Lên</span>
                 </button>
                 <div class="stamp-float-divider"></div>
                 <button type="button" class="stamp-float-btn stamp-float-btn-danger" id="btnFloatDelete" title="Xóa con dấu (Delete)">
@@ -1246,6 +1342,7 @@
 
               <div class="sign-stage-container" id="signStageContainer">
                 <canvas id="signStageCanvas"></canvas>
+                <canvas id="signDrawCanvas" class="sign-draw-canvas"></canvas>
                 <div class="sign-stage-overlay" id="signStageOverlay"></div>
               </div>
             </div>
@@ -1367,7 +1464,18 @@
     <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   </div>
 
-  <script src="utils.js?v=2.5" defer></script>
-  <script src="app.js?v=2.7" defer></script>
+  <script src="utils.js?v=2.6" defer></script>
+  <div class="startup-greeting" id="startupGreeting" role="status" aria-live="polite" hidden>
+    <svg width="30" height="30" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <circle cx="16" cy="16" r="12" stroke="#1A1C1A" stroke-width="1.5"/>
+      <circle cx="11.5" cy="12.5" r="1" fill="#1A1C1A"/>
+      <circle cx="20.5" cy="12.5" r="1" fill="#1A1C1A"/>
+      <path d="M10.5 19c2.8 3.2 8.2 3.2 11 0" stroke="#B3361F" stroke-width="1.8" stroke-linecap="round"/>
+    </svg>
+    <span>Lại cần tới tôi rồi à!</span>
+    <button type="button" id="startupGreetingClose" aria-label="Ẩn lời chào">×</button>
+  </div>
+
+  <script src="app.js?v=2.13" defer></script>
 </body>
 </html>

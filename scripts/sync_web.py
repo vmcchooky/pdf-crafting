@@ -31,6 +31,7 @@ FILES = [
     "app.js",
     "utils.js",
     "app.css",
+    "favicon.svg",
     "favicon.ico",
     "vendor/pdf-lib.min.js",
     "vendor/pdf.min.js",

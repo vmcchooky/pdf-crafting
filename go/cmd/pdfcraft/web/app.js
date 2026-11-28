@@ -26,17 +26,6 @@ function ensurePdfLibLoaded() {
   return pdfLibPromise;
 }
 
-// Nạp lười font nghệ thuật Google Fonts chỉ khi mở Studio Ký tên / Con dấu
-let cursiveFontsLoaded = false;
-function ensureCursiveFontsLoaded() {
-  if (cursiveFontsLoaded) return;
-  cursiveFontsLoaded = true;
-  const link = document.createElement('link');
-  link.rel = 'stylesheet';
-  link.href = 'https://fonts.googleapis.com/css2?family=Alex+Brush&family=Caveat:wght@600;700&family=Dancing+Script:wght@600;700&family=Great+Vibes&family=Montserrat:wght@600;700;800&family=Pacifico&display=swap';
-  document.head.appendChild(link);
-}
-
 // escapeHtml, LRUCache: dùng chung từ utils.js (nạp trước app.js).
 // (Xem web/utils.js - cũng được test tự động bằng Node.)
 
@@ -56,7 +45,7 @@ let targetSinglePageForAssign = null; // Used when assigning group from a card d
 
 // Global Application State
 const state = {
-  sources: new Map(), // sourceId -> { name, bytes, pdfLibDoc, pdfJsDoc, fileSize }
+  sources: new Map(), // sourceId -> { name, file?, bytes?, pdfLibDoc, pdfJsDoc, fileSize }
   pages: [],          // [{ id, sourceId, pageIndex, title, rotation, width, height, isSelected, groupIds: [] }]
   groups: [],         // [{ id, name, color }]
   activeGroupFilter: null, // null = all, or groupId
@@ -73,7 +62,7 @@ let nextOriginalIndex = 1;
 const historyStack = [];
 const redoStack = [];
 const MAX_HISTORY = 20;
-let lastSelectedPageIndex = null;
+let lastSelectedPageId = null;
 let dragPageIds = [];
 
 // Thumbnail image render cache (ImageBitmap / Canvas) sử dụng Bounded LRU Cache để giới hạn VRAM và tự thu hồi bitmap.close()
@@ -167,6 +156,9 @@ const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
 const insertFileInput = document.getElementById('insertFileInput');
 const pagesGrid = document.getElementById('pagesGrid');
+const startupGreeting = document.getElementById('startupGreeting');
+let startupGreetingShowTimer = null;
+let startupGreetingHideTimer = null;
 
 // Header elements
 const docStats = document.getElementById('docStats');
@@ -219,6 +211,17 @@ const modalOpenTab = document.getElementById('modalOpenTab');
 const modalPrevPage = document.getElementById('modalPrevPage');
 const modalNextPage = document.getElementById('modalNextPage');
 const modalSpinner = document.getElementById('modalSpinner');
+const modalRotatePage = document.getElementById('modalRotatePage');
+const previewStage = document.getElementById('previewStage');
+const previewCanvasSizer = document.getElementById('previewCanvasSizer');
+const previewZoomOut = document.getElementById('previewZoomOut');
+const previewZoomIn = document.getElementById('previewZoomIn');
+const previewZoomFit = document.getElementById('previewZoomFit');
+const previewZoomLabel = document.getElementById('previewZoomLabel');
+
+// Zoom xem trước tính theo tỉ lệ "vừa trang" (1 = fit), dùng transform để không re-render PDF.
+const PREVIEW_ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
+let previewZoom = 1;
 
 // Group Creation Modal elements
 const groupModal = document.getElementById('groupModal');
@@ -298,9 +301,39 @@ const modalSignThisPage = document.getElementById('modalSignThisPage');
 const tabUpload = document.getElementById('tabUpload');
 const tabType = document.getElementById('tabType');
 const tabOfficial = document.getElementById('tabOfficial');
+const tabWrite = document.getElementById('tabWrite');
 const paneUpload = document.getElementById('paneUpload');
 const paneType = document.getElementById('paneType');
 const paneOfficial = document.getElementById('paneOfficial');
+const paneWrite = document.getElementById('paneWrite');
+const signDrawCanvas = document.getElementById('signDrawCanvas');
+const toolShape = document.getElementById('toolShape');
+const toolText = document.getElementById('toolText');
+const toolPen = document.getElementById('toolPen');
+const writeShapePanel = document.getElementById('writeShapePanel');
+const writeTextPanel = document.getElementById('writeTextPanel');
+const writePenPanel = document.getElementById('writePenPanel');
+const shapeColorPicker = document.getElementById('shapeColorPicker');
+const chkShapeFill = document.getElementById('chkShapeFill');
+const shapeFillPicker = document.getElementById('shapeFillPicker');
+const rngShapeBorder = document.getElementById('rngShapeBorder');
+const lblShapeBorder = document.getElementById('lblShapeBorder');
+const rngShapeRadius = document.getElementById('rngShapeRadius');
+const lblShapeRadius = document.getElementById('lblShapeRadius');
+const btnAddShape = document.getElementById('btnAddShape');
+const writeTextInput = document.getElementById('writeTextInput');
+const writeFontSelect = document.getElementById('writeFontSelect');
+const rngWriteFontSize = document.getElementById('rngWriteFontSize');
+const lblWriteFontSize = document.getElementById('lblWriteFontSize');
+const writeTextColorPicker = document.getElementById('writeTextColorPicker');
+const btnAddText = document.getElementById('btnAddText');
+const penColorPicker = document.getElementById('penColorPicker');
+const rngPenWidth = document.getElementById('rngPenWidth');
+const lblPenWidth = document.getElementById('lblPenWidth');
+const btnUndoStroke = document.getElementById('btnUndoStroke');
+const btnClearStrokes = document.getElementById('btnClearStrokes');
+const btnFloatForward = document.getElementById('btnFloatForward');
+const btnFloatBackward = document.getElementById('btnFloatBackward');
 
 // Tab 1 Upload & Stamp Library
 const signUploadDrop = document.getElementById('signUploadDrop');
@@ -327,6 +360,8 @@ const selOfficialDateFormat = document.getElementById('selOfficialDateFormat');
 const rowOfficialDateInput = document.getElementById('rowOfficialDateInput');
 const inputOfficialDate = document.getElementById('inputOfficialDate');
 const stampBorderType = document.getElementById('stampBorderType');
+const rngOfficialRadius = document.getElementById('rngOfficialRadius');
+const lblOfficialRadius = document.getElementById('lblOfficialRadius');
 const chkOfficialGrunge = document.getElementById('chkOfficialGrunge');
 const rngOfficialAngle = document.getElementById('rngOfficialAngle');
 const lblOfficialAngle = document.getElementById('lblOfficialAngle');
@@ -579,8 +614,30 @@ const btnSaveSignDone = document.getElementById('btnSaveSignDone');
 // Initialization & Event Listeners
 // ==========================================================================
 
+function hideStartupGreeting() {
+  clearTimeout(startupGreetingShowTimer);
+  clearTimeout(startupGreetingHideTimer);
+  startupGreetingShowTimer = null;
+  startupGreetingHideTimer = null;
+  if (startupGreeting) startupGreeting.hidden = true;
+}
+
+function showStartupGreeting() {
+  startupGreetingShowTimer = null;
+  if (!startupGreeting || state.pages.length > 0 || document.querySelector('.modal.active')) return;
+  startupGreeting.hidden = false;
+  startupGreetingHideTimer = setTimeout(hideStartupGreeting, 6000);
+}
+
+function setupStartupGreeting() {
+  if (!startupGreeting) return;
+  startupGreeting.addEventListener('click', hideStartupGreeting);
+  startupGreetingShowTimer = setTimeout(showStartupGreeting, 500);
+}
+
 function init() {
   setupAccessibleModals();
+  setupStartupGreeting();
   setupUploadEvents();
   setupToolbarEvents();
   setupPagesGridDelegation();
@@ -588,6 +645,7 @@ function init() {
   setupModalEvents();
   setupCompressEvents();
   setupSignatureEvents();
+  setupWriteTools();
   setupMetaEvents();
   setupPasswordEvents();
   setupOutlineEvents();
@@ -1018,27 +1076,32 @@ function setupMetaEvents() {
   if (metaModalBackdrop) metaModalBackdrop.addEventListener('click', closeMetaModal);
   if (btnCancelMetaModal) btnCancelMetaModal.addEventListener('click', closeMetaModal);
 
+  let metaPrefillToken = 0;
   btnMetaEdit.addEventListener('click', async () => {
-    // Điền sẵn từ file nguồn đầu tiên (nếu có) để người dùng sửa tiếp
+    const token = ++metaPrefillToken;
+    // Mở modal ngay; metadata nguồn được điền sau, chỉ vào ô còn trống để không đè chữ người dùng.
+    metaModal.classList.add('active');
+    if (inputMetaTitle) inputMetaTitle.focus();
     try {
       await ensurePdfLibLoaded();
       const firstPage = state.pages.find(item => state.sources.has(item.sourceId));
       const firstSrc = firstPage ? state.sources.get(firstPage.sourceId) : null;
-      if (firstSrc) {
-        const d = await getSourcePdfLibDoc(firstSrc);
-        if (d) {
-          if (inputMetaTitle) inputMetaTitle.value = state.docMeta.title || d.getTitle() || '';
-          if (inputMetaAuthor) inputMetaAuthor.value = state.docMeta.author || d.getAuthor() || '';
-          if (inputMetaSubject) inputMetaSubject.value = state.docMeta.subject || d.getSubject() || '';
-          if (inputMetaKeywords) inputMetaKeywords.value = state.docMeta.keywords || d.getKeywords() || '';
-          if (inputMetaCreator) inputMetaCreator.value = state.docMeta.creator || d.getCreator() || '';
+      if (!firstSrc) return;
+      const d = await getSourcePdfLibDoc(firstSrc);
+      if (!d || token !== metaPrefillToken) return;
+      const fillIfEmpty = (input, value) => {
+        if (input && !input.value && typeof value === 'string' && value.trim()) {
+          input.value = value.trim();
         }
-      }
+      };
+      fillIfEmpty(inputMetaTitle, state.docMeta.title || d.getTitle());
+      fillIfEmpty(inputMetaAuthor, state.docMeta.author || d.getAuthor());
+      fillIfEmpty(inputMetaSubject, state.docMeta.subject || d.getSubject());
+      fillIfEmpty(inputMetaKeywords, state.docMeta.keywords || d.getKeywords());
+      fillIfEmpty(inputMetaCreator, state.docMeta.creator || d.getCreator());
     } catch (e) {
       console.warn('Không đọc được metadata gốc:', e);
     }
-    metaModal.classList.add('active');
-    if (inputMetaTitle) inputMetaTitle.focus();
   });
 
   if (btnSaveMeta) {
@@ -1295,7 +1358,7 @@ async function saveProject() {
       sources.push({
         name: s.name,
         fileSize: s.fileSize,
-        data: arrayBufferToBase64(s.bytes),
+        data: arrayBufferToBase64(await getSourceBytes(s)),
       });
     }
     const stampCount = state.pages.reduce((a, p) => a + (p.stamps ? p.stamps.length : 0), 0);
@@ -1306,6 +1369,7 @@ async function saveProject() {
       savedAt: new Date().toISOString(),
       docMeta: { ...state.docMeta },
       groups: state.groups.map(g => ({ id: g.id, name: g.name, color: g.color })),
+      sources,
       pages: state.pages.map(p => ({
         source: idMap.get(p.sourceId),
         pageIndex: p.pageIndex,
@@ -1366,6 +1430,7 @@ async function loadProjectFile(file) {
     if (!confirm(`Mở project sẽ thay thế ${state.pages.length} trang đang làm việc. Tiếp tục?`)) return;
   }
 
+  hideStartupGreeting();
   showToast('Đang khôi phục project...', 'success');
 
   // Reset toàn bộ trạng thái
@@ -1633,6 +1698,8 @@ function reindexGridCards(updateTitles) {
     c.dataset.index = i;
     const badge = c.querySelector('.card-num-badge');
     if (badge) badge.textContent = `#${i + 1}`;
+    const checkbox = c.querySelector('.custom-checkbox');
+    if (checkbox) checkbox.setAttribute('aria-label', `Chọn trang #${i + 1}`);
     if (updateTitles) {
       const titleInput = c.querySelector('.card-title-input');
       const pageObj = state.pages[i];
@@ -1681,67 +1748,44 @@ function removeCardsByIds(ids) {
 
 function moveSelectedPages(mode) {
   const selected = state.pages.filter(p => p.isSelected);
-  if (selected.length === 0 || selected.length === state.pages.length) return;
-  const selectedSet = new Set(selected.map(p => p.id));
-  const arr = [...state.pages];
-  let moved = false;
-
-  if (mode === 'left') {
-    // Quét trái→phải: mỗi trang đã chọn lùi 1 bước; trang không chọn tự né sang phải tạo khoảng trống
-    for (let i = 0; i < arr.length; i++) {
-      if (!selectedSet.has(arr[i].id)) continue;
-      if (i === 0) continue;
-      if (selectedSet.has(arr[i - 1].id)) continue;
-      const tmp = arr[i - 1];
-      arr[i - 1] = arr[i];
-      arr[i] = tmp;
-      moved = true;
-    }
-  } else if (mode === 'right') {
-    // Quét phải→trái: mỗi trang đã chọn tiến 1 bước; trang không chọn tự né sang trái tạo khoảng trống
-    for (let i = arr.length - 1; i >= 0; i--) {
-      if (!selectedSet.has(arr[i].id)) continue;
-      if (i === arr.length - 1) continue;
-      if (selectedSet.has(arr[i + 1].id)) continue;
-      const tmp = arr[i + 1];
-      arr[i + 1] = arr[i];
-      arr[i] = tmp;
-      moved = true;
-    }
-  } else if (mode === 'start') {
-    const firstIdx = arr.findIndex(p => selectedSet.has(p.id));
-    if (firstIdx === 0) return;
-    const rest = arr.filter(p => !selectedSet.has(p.id));
-    arr.splice(0, arr.length, ...selected, ...rest);
-    moved = true;
-  } else if (mode === 'end') {
-    let lastIdx = -1;
-    for (let i = arr.length - 1; i >= 0; i--) {
-      if (selectedSet.has(arr[i].id)) { lastIdx = i; break; }
-    }
-    if (lastIdx === arr.length - 1) return;
-    const rest = arr.filter(p => !selectedSet.has(p.id));
-    arr.splice(0, arr.length, ...rest, ...selected);
-    moved = true;
-  } else if (typeof mode === 'number' && Number.isFinite(mode)) {
-    const rest = arr.filter(p => !selectedSet.has(p.id));
-    const insertAt = Math.max(0, Math.min(mode, rest.length));
-    rest.splice(insertAt, 0, ...selected);
-    const same = arr.every((p, i) => p.id === rest[i].id);
-    if (same) return;
-    arr.splice(0, arr.length, ...rest);
-    moved = true;
-  } else {
+  if (selected.length === 0) return;
+  if (selected.length === state.pages.length) {
+    showToast('Đã chọn toàn bộ trang — không cần di chuyển!', 'info');
     return;
   }
 
-  if (!moved) {
-    showToast(mode === 'left' ? 'Đã ở vị trí đầu tiên — không thể di chuyển trái hơn!' : 'Đã ở vị trí cuối cùng — không thể di chuyển phải hơn!', 'info');
+  const selectedSet = new Set(selected.map(p => p.id));
+  const remaining = state.pages.filter(p => !selectedSet.has(p.id));
+  const baseIndex = state.pages.findIndex(p => selectedSet.has(p.id));
+  let targetIndex;
+  if (mode === 'left') targetIndex = Math.max(0, baseIndex - 1);
+  else if (mode === 'right') targetIndex = Math.min(remaining.length, baseIndex + 1);
+  else if (mode === 'start') targetIndex = 0;
+  else if (mode === 'end') targetIndex = remaining.length;
+  else if (typeof mode === 'number' && Number.isFinite(mode)) targetIndex = mode;
+  else return;
+
+  const arr = reorderPageBlock(state.pages, selectedSet, targetIndex);
+  if (arr.every((page, index) => page.id === state.pages[index].id)) {
+    const messages = {
+      left: 'Khối trang đã ở vị trí đầu tiên!',
+      right: 'Khối trang đã ở vị trí cuối cùng!',
+      start: 'Khối trang đã ở đầu danh sách!',
+      end: 'Khối trang đã ở cuối danh sách!',
+    };
+    const finalPosition = arr.findIndex(page => selectedSet.has(page.id)) + 1;
+    showToast(messages[mode] || `Khối trang đã ở vị trí #${finalPosition}!`, 'info');
     return;
   }
 
   saveHistoryState();
+  if (state.activeGroupFilter) {
+    state.activeGroupFilter = null;
+    pagesGrid.querySelectorAll('.page-card').forEach(card => { card.style.display = 'flex'; });
+    renderGroupBar();
+  }
   const firstRects = captureCardRects();
+  const focusedElement = document.activeElement;
   state.pages = arr;
   updateSelectionUI();
 
@@ -1756,11 +1800,15 @@ function moveSelectedPages(mode) {
     reindexGridCards(true);
     animateGridReflow(firstRects);
   }
+  if (focusedElement && focusedElement.isConnected && pagesGrid.contains(focusedElement)) {
+    focusedElement.focus({ preventScroll: true });
+  }
 
   flashMovedCards(selected.map(p => p.id));
 
   const labels = { start: 'đầu danh sách', end: 'cuối danh sách', left: 'sang trái', right: 'sang phải' };
-  const label = labels[mode] || (typeof mode === 'number' ? `vị trí #${mode + 1}` : '');
+  const finalPosition = arr.findIndex(page => selectedSet.has(page.id)) + 1;
+  const label = labels[mode] || (typeof mode === 'number' ? `vị trí #${finalPosition}` : '');
   showToast(`Đã di chuyển ${selected.length} trang${label ? ' ' + label : ''}`, 'success');
 }
 
@@ -1865,6 +1913,8 @@ function setupToolbarEvents() {
       c.dataset.index = idx;
       const badge = c.querySelector('.card-num-badge');
       if (badge) badge.textContent = `#${idx + 1}`;
+      const checkbox = c.querySelector('.custom-checkbox');
+      if (checkbox) checkbox.setAttribute('aria-label', `Chọn trang #${idx + 1}`);
       fragment.appendChild(c);
     });
     pagesGrid.appendChild(fragment);
@@ -1879,7 +1929,7 @@ function setupToolbarEvents() {
     btnMoveToPos.addEventListener('click', () => {
       const selectedCount = state.pages.filter(p => p.isSelected).length;
       if (selectedCount === 0) return;
-      const raw = prompt(`Chuyển ${selectedCount} trang đã chọn tới vị trí số (1 – ${state.pages.length - selectedCount + 1}):`, '1');
+      const raw = prompt(`Đưa khối ${selectedCount} trang đã chọn tới vị trí bắt đầu số (1 – ${state.pages.length - selectedCount + 1}):`, '1');
       if (raw === null) return;
       const n = parseInt(raw, 10);
       if (!Number.isFinite(n) || n < 1) {
@@ -2403,6 +2453,8 @@ function setupModalEvents() {
     previewModal.classList.remove('active');
     state.currentModalIndex = null;
     currentModalRenderIndex = null;
+    previewZoom = 1;
+    if (modalCanvas) modalCanvas.style.transform = '';
   };
 
   modalClose.addEventListener('click', closeModal);
@@ -2413,6 +2465,8 @@ function setupModalEvents() {
     if (state.currentModalIndex !== null && state.pages[state.currentModalIndex]) {
       const item = state.pages[state.currentModalIndex];
       item.title = modalTitleInput.value.trim() || `#${state.currentModalIndex + 1}`;
+      modalTitleInput.value = item.title;
+      modalTitleInput.title = item.title;
       // Update card title input in grid
       const card = pagesGrid.querySelector(`.page-card[data-page-id="${item.id}"]`);
       if (card) {
@@ -2461,6 +2515,28 @@ function setupModalEvents() {
     });
   }
 
+  if (modalRotatePage) modalRotatePage.addEventListener('click', rotateCurrentPreviewPage);
+
+  if (previewZoomIn) previewZoomIn.addEventListener('click', () => stepPreviewZoom(1));
+  if (previewZoomOut) previewZoomOut.addEventListener('click', () => stepPreviewZoom(-1));
+  if (previewZoomFit) previewZoomFit.addEventListener('click', resetPreviewZoom);
+
+  if (previewStage) {
+    let lastWheelZoom = 0;
+    previewStage.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey || !previewModal.classList.contains('active')) return;
+      e.preventDefault();
+      const now = performance.now();
+      if (now - lastWheelZoom < 60) return;
+      lastWheelZoom = now;
+      stepPreviewZoom(e.deltaY < 0 ? 1 : -1);
+    }, { passive: false });
+  }
+
+  window.addEventListener('resize', () => {
+    if (previewModal.classList.contains('active')) updatePreviewZoomLayout();
+  });
+
   window.addEventListener('keydown', (e) => {
     if (!previewModal.classList.contains('active')) return;
     if (e.target === modalTitleInput) return; // Don't trigger arrows if typing in input
@@ -2470,6 +2546,18 @@ function setupModalEvents() {
       openPreviewModal(state.currentModalIndex - 1);
     } else if (e.key === 'ArrowRight' && state.currentModalIndex !== null && state.currentModalIndex < state.pages.length - 1) {
       openPreviewModal(state.currentModalIndex + 1);
+    } else if (e.key === 'r' || e.key === 'R') {
+      e.preventDefault();
+      rotateCurrentPreviewPage();
+    } else if (e.key === '+' || e.key === '=') {
+      e.preventDefault();
+      stepPreviewZoom(1);
+    } else if (e.key === '-' || e.key === '_') {
+      e.preventDefault();
+      stepPreviewZoom(-1);
+    } else if (e.key === '0') {
+      e.preventDefault();
+      resetPreviewZoom();
     }
   });
 }
@@ -2520,9 +2608,10 @@ function promptPdfPassword(fileName, wasWrong) {
   });
 }
 
-async function openPdfWithPassword(fileName, masterBuffer) {
+async function openPdfWithPassword(fileName, getBuffer) {
   try {
-    const doc = await pdfjsLib.getDocument({ data: masterBuffer.slice(0) }).promise;
+    // Buffer được chuyển thẳng cho pdf.js (worker), không giữ bản sao trong main thread.
+    const doc = await pdfjsLib.getDocument({ data: await getBuffer() }).promise;
     return { doc, password: '' };
   } catch (err) {
     if (!isPasswordException(err)) throw err;
@@ -2532,13 +2621,35 @@ async function openPdfWithPassword(fileName, masterBuffer) {
     const pw = await promptPdfPassword(fileName, wasWrong);
     if (pw === null) return null; // người dùng bỏ qua file
     try {
-      const doc = await pdfjsLib.getDocument({ data: masterBuffer.slice(0), password: pw }).promise;
+      const doc = await pdfjsLib.getDocument({ data: await getBuffer(), password: pw }).promise;
       return { doc, password: pw };
     } catch (err) {
       if (!isPasswordException(err)) throw err;
       wasWrong = true; // sai mật khẩu, hỏi lại
     }
   }
+}
+
+// Đọc bytes gốc khi thật sự cần (xuất PDF/lưu project), không giữ bản sao suốt phiên.
+async function getSourceBytes(srcObj) {
+  if (!srcObj) return new Uint8Array();
+  if (srcObj.bytes) return srcObj.bytes;
+  if (srcObj.pdfJsDoc && typeof srcObj.pdfJsDoc.getData === 'function') {
+    try {
+      const data = await srcObj.pdfJsDoc.getData();
+      if (data && data.byteLength) return data;
+    } catch (e) {
+      // rơi xuống đọc lại File bên dưới
+    }
+  }
+  if (srcObj.file) {
+    try {
+      return new Uint8Array(await srcObj.file.arrayBuffer());
+    } catch (e) {
+      // File có thể đã bị di chuyển/xóa.
+    }
+  }
+  return new Uint8Array();
 }
 
 // formatBytes: dùng chung từ utils.js.
@@ -2548,7 +2659,7 @@ async function getSourcePdfLibDoc(srcObj) {
   await ensurePdfLibLoaded();
   if (!srcObj.pdfLibDoc) {
     try {
-      srcObj.pdfLibDoc = await PDFLib.PDFDocument.load(srcObj.bytes.slice(0));
+      srcObj.pdfLibDoc = await PDFLib.PDFDocument.load(await getSourceBytes(srcObj));
     } catch (err) {
       if (srcObj.password) {
         throw new Error('File mã hóa: Web UI chưa hỗ trợ xuất file có mật khẩu, hãy giải mã trước bằng lệnh `pdfcraft decrypt`');
@@ -2568,6 +2679,7 @@ async function loadPdfFiles(files, isAppend = false) {
     return;
   }
 
+  hideStartupGreeting();
   showToast(`Đang chuẩn bị xử lý ${validFiles.length} tệp PDF...`, 'success');
 
   if (!isAppend) {
@@ -2605,12 +2717,11 @@ async function loadPdfFiles(files, isAppend = false) {
     const file = validFiles[fIdx];
     try {
       showToast(`Đang nạp (${fIdx + 1}/${validFiles.length}): ${file.name}...`, 'success');
-      const arrayBuffer = await file.arrayBuffer();
       const sourceId = 'src_' + (nextId++);
 
       // File mã hóa: hỏi mật khẩu (thử lại khi sai, bỏ qua khi hủy)
-      // Truyền bản sao slice(0) cho Worker của pdf.js để tránh Worker chiếm và detach master buffer
-      const opened = await openPdfWithPassword(file.name, arrayBuffer);
+      // Đọc lại File mỗi lần thử; pdf.js nhận buffer trực tiếp, không giữ bản sao gốc trong RAM.
+      const opened = await openPdfWithPassword(file.name, () => file.arrayBuffer());
       if (!opened) {
         showToast(`Đã bỏ qua file mã hóa: ${file.name}`, 'success');
         continue;
@@ -2619,20 +2730,14 @@ async function loadPdfFiles(files, isAppend = false) {
 
       const srcObj = {
         name: file.name,
-        bytes: arrayBuffer,
+        file: file, // đọc lại khi xuất PDF/lưu project — không giữ bytes suốt phiên
+        bytes: null,
         password: opened.password,
         pdfJsDoc,
         pdfLibDoc: null, // Nạp lười khi xuất PDF
         fileSize: file.size,
       };
       state.sources.set(sourceId, srcObj);
-
-      // Nạp lười trước PDFLib trong thời gian rảnh rỗi của trình duyệt
-      if ('requestIdleCallback' in window) {
-        window.requestIdleCallback(() => {
-          ensurePdfLibLoaded().then(() => getSourcePdfLibDoc(srcObj)).catch(() => {});
-        });
-      }
 
       // Lấy kích thước trang 1 làm kích thước ban đầu (mở file siêu tốc < 50ms, không lặp tuần tự getPage)
       let defaultWidth = 595;
@@ -2697,7 +2802,13 @@ async function loadPdfFiles(files, isAppend = false) {
 // ==========================================================================
 
 function updateSelectionUI() {
-  const selectedCount = state.pages.filter(p => p.isSelected).length;
+  let selectedCount = 0;
+  let anchorExists = false;
+  for (const page of state.pages) {
+    if (page.isSelected) selectedCount++;
+    if (page.id === lastSelectedPageId) anchorExists = true;
+  }
+  if (lastSelectedPageId !== null && !anchorExists) lastSelectedPageId = null;
   const totalCount = state.pages.length;
 
   statPageCount.textContent = totalCount;
@@ -2773,7 +2884,10 @@ function renderGrid() {
       }
 
       const checkbox = card.querySelector('.custom-checkbox');
-      if (checkbox) checkbox.checked = pageItem.isSelected;
+      if (checkbox) {
+        checkbox.checked = pageItem.isSelected;
+        checkbox.setAttribute('aria-label', `Chọn trang #${index + 1}`);
+      }
       card.classList.toggle('selected', pageItem.isSelected);
 
       // Đồng bộ badge chữ ký/con dấu khi card được tái sử dụng (renderGrid không recreate)
@@ -2872,40 +2986,47 @@ function rotateCard(card, pageItem) {
   }
 }
 
+function rotatePageInPlace(pageItem) {
+  if (!pageItem) return;
+  thumbnailCache.delete(`${pageItem.id}_${pageItem.rotation}`);
+  previewCache.delete(`${pageItem.id}_${pageItem.rotation}_hd`);
+  pageItem.rotation = ((pageItem.rotation || 0) + 90) % 360;
+
+  // Cập nhật trực tiếp thẻ đang hiển thị, không render lại toàn bộ lưới
+  const card = pagesGrid.querySelector(`.page-card[data-page-id="${pageItem.id}"]`);
+  if (!card) return;
+  const isSwapped = (pageItem.rotation / 90) % 2 !== 0;
+  const dimTag = card.querySelector('.card-dim-tag');
+  if (dimTag) {
+    const cw = isSwapped ? pageItem.height : pageItem.width;
+    const ch = isSwapped ? pageItem.width : pageItem.height;
+    dimTag.textContent = `${cw} × ${ch} pt`;
+  }
+  delete card.dataset.thumbRendered;
+  const canvas = card.querySelector('canvas');
+  if (canvas) {
+    canvas.style.opacity = '0.35';
+    enqueueThumbnailRender(pageItem, canvas, card);
+  }
+}
+
 function rotateSelectedPages() {
   const selected = state.pages.filter(p => p.isSelected);
   if (selected.length === 0) return;
   saveHistoryState();
-
-  const selectedIds = new Set(selected.map(p => p.id));
-  selected.forEach(pageItem => {
-    thumbnailCache.delete(`${pageItem.id}_${pageItem.rotation}`);
-    previewCache.delete(`${pageItem.id}_${pageItem.rotation}_hd`);
-    pageItem.rotation = ((pageItem.rotation || 0) + 90) % 360;
-  });
-
-  // Cập nhật trực tiếp các thẻ đang hiển thị, không render lại toàn bộ lưới
-  pagesGrid.querySelectorAll('.page-card').forEach(card => {
-    const pid = card.dataset.pageId;
-    if (!pid || !selectedIds.has(pid)) return;
-    const pageItem = getPageItemForCard(card);
-    if (!pageItem) return;
-    const isSwapped = (pageItem.rotation / 90) % 2 !== 0;
-    const dimTag = card.querySelector('.card-dim-tag');
-    if (dimTag) {
-      const cw = isSwapped ? pageItem.height : pageItem.width;
-      const ch = isSwapped ? pageItem.width : pageItem.height;
-      dimTag.textContent = `${cw} × ${ch} pt`;
-    }
-    delete card.dataset.thumbRendered;
-    const canvas = card.querySelector('canvas');
-    if (canvas) {
-      canvas.style.opacity = '0.35';
-      enqueueThumbnailRender(pageItem, canvas, card);
-    }
-  });
-
+  selected.forEach(rotatePageInPlace);
   showToast(`Đã xoay ${selected.length} trang đã chọn thêm 90°`, 'success');
+}
+
+function rotateCurrentPreviewPage() {
+  if (state.currentModalIndex === null) return;
+  const pageItem = state.pages[state.currentModalIndex];
+  if (!pageItem) return;
+  const pageNum = state.currentModalIndex + 1;
+  saveHistoryState();
+  rotatePageInPlace(pageItem);
+  showToast(`Đã xoay trang #${pageNum} thêm 90°`, 'success');
+  openPreviewModal(state.currentModalIndex);
 }
 
 function deleteSinglePage(card, curIdx) {
@@ -2929,31 +3050,34 @@ function deleteSinglePage(card, curIdx) {
 
 function toggleCardSelection(card, pageItem, e) {
   const checkbox = card.querySelector('.custom-checkbox');
-  const curIndex = parseInt(card.dataset.index, 10);
+  const curIndex = state.pages.findIndex(page => page.id === pageItem.id);
+  if (e.shiftKey && lastSelectedPageId !== null) {
+    const anchorIndex = state.pages.findIndex(page => page.id === lastSelectedPageId);
+    if (anchorIndex !== -1) {
+      const start = Math.min(anchorIndex, curIndex);
+      const end = Math.max(anchorIndex, curIndex);
+      for (let index = start; index <= end; index++) {
+        const selectedPage = state.pages[index];
+        selectedPage.isSelected = true;
+        const selectedCard = pagesGrid.querySelector(`.page-card[data-page-id="${selectedPage.id}"]`);
+        if (selectedCard) {
+          selectedCard.classList.add('selected');
+          const selectedCheckbox = selectedCard.querySelector('.custom-checkbox');
+          if (selectedCheckbox) selectedCheckbox.checked = true;
+        }
+      }
+      lastSelectedPageId = pageItem.id;
+      updateSelectionUI();
+      return;
+    }
+  }
+
   if (e.target !== checkbox) {
     checkbox.checked = !checkbox.checked;
   }
-  const targetState = checkbox.checked;
-
-  if (e.shiftKey && lastSelectedPageIndex !== null && lastSelectedPageIndex !== curIndex) {
-    const start = Math.min(lastSelectedPageIndex, curIndex);
-    const end = Math.max(lastSelectedPageIndex, curIndex);
-    for (let i = start; i <= end; i++) {
-      if (state.pages[i]) {
-        state.pages[i].isSelected = targetState;
-        const c = pagesGrid.querySelector(`.page-card[data-index="${i}"]`);
-        if (c) {
-          c.classList.toggle('selected', targetState);
-          const chk = c.querySelector('.custom-checkbox');
-          if (chk) chk.checked = targetState;
-        }
-      }
-    }
-  } else {
-    pageItem.isSelected = targetState;
-    card.classList.toggle('selected', targetState);
-    lastSelectedPageIndex = curIndex;
-  }
+  pageItem.isSelected = checkbox.checked;
+  card.classList.toggle('selected', checkbox.checked);
+  lastSelectedPageId = pageItem.id;
   updateSelectionUI();
 }
 
@@ -3109,12 +3233,12 @@ function setupPagesGridDelegation() {
     const targetIndex = remainingPages.indexOf(targetPage);
     if (targetIndex < 0) return false;
     const insertionIndex = targetIndex + (placeBefore ? 0 : 1);
-    const newOrder = remainingPages.slice();
-    newOrder.splice(insertionIndex, 0, ...movingPages);
+    const newOrder = reorderPageBlock(state.pages, movingIds, insertionIndex);
     if (newOrder.every((page, index) => page.id === state.pages[index].id)) return false;
 
     saveHistoryState();
     const firstRects = captureCardRects();
+    const focusedElement = document.activeElement;
     state.pages = newOrder;
 
     const cardsById = new Map();
@@ -3129,6 +3253,9 @@ function setupPagesGridDelegation() {
     }
     updateSelectionUI();
     animateGridReflow(firstRects);
+    if (focusedElement && focusedElement.isConnected && pagesGrid.contains(focusedElement)) {
+      focusedElement.focus({ preventScroll: true });
+    }
     return true;
   }
 
@@ -3256,7 +3383,10 @@ function createCardElement(pageItem, index) {
   card.dataset.pageId = pageItem.id;
 
   const checkbox = card.querySelector('.custom-checkbox');
-  if (checkbox) checkbox.checked = pageItem.isSelected;
+  if (checkbox) {
+    checkbox.checked = pageItem.isSelected;
+    checkbox.setAttribute('aria-label', `Chọn trang #${index + 1}`);
+  }
 
   const badge = card.querySelector('.card-num-badge');
   if (badge) badge.textContent = `#${index + 1}`;
@@ -3620,8 +3750,80 @@ async function openPageInNewTab(pageItem, pageNum) {
   }
 }
 
+function previewZoomText() {
+  return previewZoom === 1 ? 'Vừa trang' : `${Math.round(previewZoom * 100)}%`;
+}
+
+function updatePreviewZoomLayout() {
+  if (!previewStage || !modalCanvas) return;
+  const intrinsicW = modalCanvas.width;
+  const intrinsicH = modalCanvas.height;
+  if (!intrinsicW || !intrinsicH) return;
+  const style = getComputedStyle(previewStage);
+  const padX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+  const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+  const availW = Math.max(1, previewStage.clientWidth - padX);
+  const availH = Math.max(1, previewStage.clientHeight - padY);
+  const fit = Math.min(availW / intrinsicW, availH / intrinsicH, 1);
+  const baseW = Math.max(1, intrinsicW * fit);
+  const baseH = Math.max(1, intrinsicH * fit);
+  modalCanvas.style.width = `${baseW}px`;
+  modalCanvas.style.height = `${baseH}px`;
+  modalCanvas.style.transform = `scale(${previewZoom})`;
+  if (previewCanvasSizer) {
+    previewCanvasSizer.style.width = `${baseW * previewZoom}px`;
+    previewCanvasSizer.style.height = `${baseH * previewZoom}px`;
+  }
+  if (previewZoomLabel) previewZoomLabel.textContent = previewZoomText();
+  if (previewZoomOut) previewZoomOut.disabled = previewZoom <= PREVIEW_ZOOM_STEPS[0];
+  if (previewZoomIn) previewZoomIn.disabled = previewZoom >= PREVIEW_ZOOM_STEPS[PREVIEW_ZOOM_STEPS.length - 1];
+}
+
+function setPreviewZoom(next, keepCenter = true) {
+  const clamped = Math.max(
+    PREVIEW_ZOOM_STEPS[0],
+    Math.min(PREVIEW_ZOOM_STEPS[PREVIEW_ZOOM_STEPS.length - 1], next)
+  );
+  if (Math.abs(clamped - previewZoom) < 0.001) return;
+  let centerXRatio = 0.5;
+  let centerYRatio = 0.5;
+  if (keepCenter && previewStage && previewCanvasSizer) {
+    const oldW = previewCanvasSizer.offsetWidth || 1;
+    const oldH = previewCanvasSizer.offsetHeight || 1;
+    centerXRatio = (previewStage.scrollLeft + previewStage.clientWidth / 2) / oldW;
+    centerYRatio = (previewStage.scrollTop + previewStage.clientHeight / 2) / oldH;
+  }
+  previewZoom = clamped;
+  updatePreviewZoomLayout();
+  if (keepCenter && previewStage && previewCanvasSizer) {
+    requestAnimationFrame(() => {
+      previewStage.scrollLeft = centerXRatio * previewCanvasSizer.offsetWidth - previewStage.clientWidth / 2;
+      previewStage.scrollTop = centerYRatio * previewCanvasSizer.offsetHeight - previewStage.clientHeight / 2;
+    });
+  }
+}
+
+function stepPreviewZoom(direction) {
+  const idx = PREVIEW_ZOOM_STEPS.findIndex(z => Math.abs(z - previewZoom) < 0.001);
+  const currentIdx = idx === -1 ? PREVIEW_ZOOM_STEPS.indexOf(1) : idx;
+  const nextIdx = Math.max(0, Math.min(PREVIEW_ZOOM_STEPS.length - 1, currentIdx + direction));
+  setPreviewZoom(PREVIEW_ZOOM_STEPS[nextIdx]);
+}
+
+function resetPreviewZoom() {
+  previewZoom = 1;
+  updatePreviewZoomLayout();
+  if (previewStage) {
+    previewStage.scrollLeft = 0;
+    previewStage.scrollTop = 0;
+  }
+}
+
 async function openPreviewModal(pageIndex) {
   if (pageIndex < 0 || pageIndex >= state.pages.length) return;
+
+  const wasActive = previewModal.classList.contains('active');
+  if (!wasActive) previewZoom = 1;
 
   state.currentModalIndex = pageIndex;
   currentModalRenderIndex = pageIndex;
@@ -3630,8 +3832,10 @@ async function openPreviewModal(pageIndex) {
   const srcObj = state.sources.get(pageItem.sourceId);
   if (!srcObj) return;
 
+  const titleText = pageItem.title || `#${pageNum}`;
   modalPageNumBadge.textContent = `#${pageNum}`;
-  modalTitleInput.value = pageItem.title || `#${pageNum}`;
+  modalTitleInput.value = titleText;
+  modalTitleInput.title = titleText;
   if (modalPageInfo) {
     modalPageInfo.textContent = `${srcObj.name} • ${pageNum}/${state.pages.length}`;
   }
@@ -3640,6 +3844,7 @@ async function openPreviewModal(pageIndex) {
   if (modalNextPage) modalNextPage.disabled = pageIndex === state.pages.length - 1;
 
   previewModal.classList.add('active');
+  requestAnimationFrame(updatePreviewZoomLayout);
 
   const cacheKey = `${pageItem.id}_${pageItem.rotation}_hd`;
 
@@ -3659,6 +3864,7 @@ async function openPreviewModal(pageIndex) {
     if (pageItem.stamps && pageItem.stamps.length > 0) {
       drawStampsOnCanvas(ctx, pageItem.stamps, modalCanvas.width, modalCanvas.height);
     }
+    updatePreviewZoomLayout();
     prefetchAdjacentPages(pageIndex);
     return;
   }
@@ -3680,6 +3886,7 @@ async function openPreviewModal(pageIndex) {
     }
     modalCanvas.style.opacity = '1';
     if (modalSpinner) modalSpinner.style.display = 'none';
+    updatePreviewZoomLayout();
   } else {
     modalCanvas.style.opacity = '0.2';
     if (modalSpinner) modalSpinner.style.display = 'flex';
@@ -3705,6 +3912,7 @@ async function openPreviewModal(pageIndex) {
         drawStampsOnCanvas(ctx, pageItem.stamps, modalCanvas.width, modalCanvas.height);
       }
       modalCanvas.style.opacity = '1';
+      updatePreviewZoomLayout();
     }
 
     if (modalSpinner) modalSpinner.style.display = 'none';
@@ -4005,7 +4213,7 @@ function setupCompressEvents() {
   });
 
   presetMaxCompress.addEventListener('click', () => {
-    setPreset('max', 96, 40, true);
+    setPreset('max', 96, 40, false);
   });
 
   presetHighQuality.addEventListener('click', () => {
@@ -4102,7 +4310,7 @@ async function executeCompressAndExport(pagesToExport, outputFileName, options) 
   };
 
   updateProgress(0, pagesToExport.length, 'Khởi động hồ tiến trình song song (Concurrency Pool)...');
-  await new Promise(r => setTimeout(r, 40));
+  await new Promise(r => setTimeout(r, 0));
 
   try {
     await ensurePdfLibLoaded();
@@ -4202,7 +4410,7 @@ async function executeCompressAndExport(pagesToExport, outputFileName, options) 
           pagesToExport.length,
           `Đang xử lý song song trang ${completedCount}/${pagesToExport.length}...`
         );
-        await new Promise(r => setTimeout(r, 5));
+        await new Promise(r => setTimeout(r, 0));
       }
     };
 
@@ -4337,29 +4545,31 @@ async function executeCompressAndExport(pagesToExport, outputFileName, options) 
 
     // Maximum Flate Stream compression
     updateProgress(pagesToExport.length, pagesToExport.length, 'Đang nén Flate luồng dữ liệu & đóng gói...');
-    await new Promise(r => setTimeout(r, 15));
 
     const saveOptions = {
       useObjectStreams: options.maxFlate !== false
     };
     let pdfBytes = await outPdf.save(saveOptions);
 
-    // Tối ưu hóa sâu bằng Goroutine backend qua /api/optimize
-    try {
-      updateProgress(pagesToExport.length, pagesToExport.length, 'Đang tăng tốc tối ưu bằng Goroutine backend...');
-      const resp = await fetch('/api/optimize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/pdf' },
-        body: pdfBytes
-      });
-      if (resp.ok) {
-        const optimizedBuffer = await resp.arrayBuffer();
-        if (optimizedBuffer && optimizedBuffer.byteLength > 0) {
-          pdfBytes = new Uint8Array(optimizedBuffer);
+    // Tối ưu hóa sâu bằng Goroutine backend chỉ có lợi cho bản vector.
+    // Bản raster (JPEG + object streams) gần như không giảm thêm nhưng tốn một vòng parse/upload.
+    if (!options.rasterizeHeavy) {
+      try {
+        updateProgress(pagesToExport.length, pagesToExport.length, 'Đang tối ưu hóa cấu trúc PDF...');
+        const resp = await fetch('/api/optimize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/pdf' },
+          body: pdfBytes
+        });
+        if (resp.ok) {
+          const optimizedBuffer = await resp.arrayBuffer();
+          if (optimizedBuffer && optimizedBuffer.byteLength > 0) {
+            pdfBytes = new Uint8Array(optimizedBuffer);
+          }
         }
+      } catch (backendErr) {
+        console.warn('Tối ưu hậu kỳ bỏ qua, dùng bản nén frontend:', backendErr);
       }
-    } catch (backendErr) {
-      console.warn('Goroutine backend optimize bỏ qua, dùng bản nén frontend:', backendErr);
     }
 
     if (!options.removeOutlines) {
@@ -4370,7 +4580,7 @@ async function executeCompressAndExport(pagesToExport, outputFileName, options) 
     const formattedSize = formatBytes(compressedSize);
 
     updateProgress(pagesToExport.length, pagesToExport.length, `Hoàn tất! Dung lượng mới: ${formattedSize}`);
-    await new Promise(r => setTimeout(r, 350));
+    await new Promise(r => setTimeout(r, 120));
 
     downloadBlob(pdfBytes, outputFileName);
     showToast(`Đã nén & xuất thành công tệp: ${outputFileName} (${formattedSize})!`, 'success');
@@ -4450,10 +4660,57 @@ const signStudioState = {
   officialColor: '#c81e1e',
   stageZoom: 1.0,
   selectedStampId: null,
+  writeTool: 'shape',
+  shapeColor: '#1a1c1a',
+  shapeFillColor: '#ffffff',
+  writeTextColor: '#1a1c1a',
+  penColor: '#1a1c1a',
   currentStamps: [], // working array of stamps for currently active stage page
 };
 
 const STAMP_LIB_STORAGE_KEY = 'pdfcraft_stamp_library';
+
+const WRITE_INK_COLORS = [
+  { value: '#1a1c1a', name: 'Mực đen' },
+  { value: '#ffffff', name: 'Trắng' },
+  { value: '#6b6f68', name: 'Xám' },
+  { value: '#cbd5e1', name: 'Xám nhạt' },
+  { value: '#b3361f', name: 'Đỏ son' },
+  { value: '#dc2626', name: 'Đỏ' },
+  { value: '#c2410c', name: 'Cam' },
+  { value: '#d97706', name: 'Hổ phách' },
+  { value: '#eab308', name: 'Vàng' },
+  { value: '#facc15', name: 'Vàng tươi' },
+  { value: '#176b45', name: 'Xanh lá đậm' },
+  { value: '#16a34a', name: 'Xanh lá' },
+  { value: '#0f766e', name: 'Xanh mòng két' },
+  { value: '#0891b2', name: 'Xanh cyan' },
+  { value: '#1d4ed8', name: 'Xanh dương' },
+  { value: '#2563eb', name: 'Xanh dương tươi' },
+  { value: '#4338ca', name: 'Xanh chàm' },
+  { value: '#7e22ce', name: 'Tím' },
+  { value: '#be185d', name: 'Hồng' },
+  { value: '#f472b6', name: 'Hồng tươi' },
+  { value: '#92400e', name: 'Nâu' },
+  { value: '#a16207', name: 'Nâu vàng' },
+  { value: '#fef3c7', name: 'Kem nhạt' },
+  { value: '#dbeafe', name: 'Xanh nhạt' },
+];
+
+const WRITE_FILL_COLORS = [
+  { value: '#ffffff', name: 'Trắng' },
+  { value: '#fef3c7', name: 'Vàng nhạt' },
+  { value: '#facc15', name: 'Vàng' },
+  { value: '#dcfce7', name: 'Xanh lá nhạt' },
+  { value: '#4ade80', name: 'Xanh lá' },
+  { value: '#cffafe', name: 'Cyan nhạt' },
+  { value: '#38bdf8', name: 'Cyan' },
+  { value: '#dbeafe', name: 'Xanh dương nhạt' },
+  { value: '#fce7f3', name: 'Hồng nhạt' },
+  { value: '#f472b6', name: 'Hồng' },
+  { value: '#fee2e2', name: 'Đỏ nhạt' },
+  { value: '#ef4444', name: 'Đỏ' },
+];
 
 function getStoredStampLibrary() {
   try {
@@ -4807,6 +5064,7 @@ function generateOfficialStampDataUrl(opts) {
     extra = '',
     borderType = 'single',
     color = '#c81e1e',
+    cornerRadius = 0,
     hasDate = false,
     dateText = '',
     hasGrunge = true,
@@ -4919,18 +5177,29 @@ function generateOfficialStampDataUrl(opts) {
     else if (linesCount === 3) baseH = 155;
     else if (linesCount >= 4) baseH = 190;
 
-    canvas.width = baseW * dpr;
-    canvas.height = baseH * dpr;
+    // Khi nghiêng, canvas phải nới rộng theo bounding box xoay, nếu không
+    // các góc con dấu sẽ bị cắt mất (nhất là dấu 1 dòng thấp).
+    const angleRad = (angle * Math.PI) / 180;
+    const hasRotation = angle !== 0;
+    const canvasW = hasRotation
+      ? Math.ceil(baseW * Math.abs(Math.cos(angleRad)) + baseH * Math.abs(Math.sin(angleRad)))
+      : baseW;
+    const canvasH = hasRotation
+      ? Math.ceil(baseW * Math.abs(Math.sin(angleRad)) + baseH * Math.abs(Math.cos(angleRad)))
+      : baseH;
+
+    canvas.width = canvasW * dpr;
+    canvas.height = canvasH * dpr;
     const ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, baseW, baseH);
+    ctx.clearRect(0, 0, canvasW, canvasH);
 
     const centerX = baseW / 2;
     const centerY = baseH / 2;
 
-    if (angle !== 0) {
-      ctx.translate(centerX, centerY);
-      ctx.rotate((angle * Math.PI) / 180);
+    if (hasRotation) {
+      ctx.translate(canvasW / 2, canvasH / 2);
+      ctx.rotate(angleRad);
       ctx.translate(-centerX, -centerY);
     }
 
@@ -4940,33 +5209,34 @@ function generateOfficialStampDataUrl(opts) {
     const rectW = baseW - pad * 2;
     const rectH = baseH - pad * 2;
 
-    // Draw Border
-    if (borderType === 'single') {
-      ctx.lineWidth = 3.5;
+    // Draw Border (bo góc 0 = vuông; slider điều chỉnh bán kính)
+    const drawBorderRect = (x, y, w, h, radius, lineWidth) => {
+      ctx.lineWidth = lineWidth;
       ctx.strokeStyle = color;
-      ctx.strokeRect(rectX, rectY, rectW, rectH);
-    } else if (borderType === 'double') {
-      ctx.lineWidth = 3.5;
-      ctx.strokeStyle = color;
-      ctx.strokeRect(rectX, rectY, rectW, rectH);
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(rectX + 4.5, rectY + 4.5, rectW - 9, rectH - 9);
-    } else if (borderType === 'rounded') {
-      ctx.lineWidth = 3.5;
-      ctx.strokeStyle = color;
-      const r = 12;
+      const rr = Math.max(0, Math.min(radius, Math.min(w, h) / 2));
+      if (rr <= 0) {
+        ctx.strokeRect(x, y, w, h);
+        return;
+      }
       ctx.beginPath();
-      ctx.moveTo(rectX + r, rectY);
-      ctx.lineTo(rectX + rectW - r, rectY);
-      ctx.arcTo(rectX + rectW, rectY, rectX + rectW, rectY + r, r);
-      ctx.lineTo(rectX + rectW, rectY + rectH - r);
-      ctx.arcTo(rectX + rectW, rectY + rectH, rectX + rectW - r, rectY + rectH, r);
-      ctx.lineTo(rectX + r, rectY + rectH);
-      ctx.arcTo(rectX, rectY + rectH, rectX, rectY + rectH - r, r);
-      ctx.lineTo(rectX, rectY + r);
-      ctx.arcTo(rectX, rectY, rectX + r, rectY, r);
+      ctx.moveTo(x + rr, y);
+      ctx.lineTo(x + w - rr, y);
+      ctx.arcTo(x + w, y, x + w, y + rr, rr);
+      ctx.lineTo(x + w, y + h - rr);
+      ctx.arcTo(x + w, y + h, x + w - rr, y + h, rr);
+      ctx.lineTo(x + rr, y + h);
+      ctx.arcTo(x, y + h, x, y + h - rr, rr);
+      ctx.lineTo(x, y + rr);
+      ctx.arcTo(x, y, x + rr, y, rr);
       ctx.closePath();
       ctx.stroke();
+    };
+    const radius = borderType === 'rounded' ? 12 : Math.max(0, Number(cornerRadius) || 0);
+    if (borderType === 'single' || borderType === 'rounded') {
+      drawBorderRect(rectX, rectY, rectW, rectH, radius, 3.5);
+    } else if (borderType === 'double') {
+      drawBorderRect(rectX, rectY, rectW, rectH, radius, 3.5);
+      drawBorderRect(rectX + 4.5, rectY + 4.5, rectW - 9, rectH - 9, Math.max(1, radius - 4.5), 1.5);
     }
 
     // Compute Lines Layout
@@ -5018,30 +5288,46 @@ function generateOfficialStampDataUrl(opts) {
   return cropCanvasBoundingBox(canvas) || canvas.toDataURL('image/png');
 }
 
-function updateOfficialStampPreview() {
-  if (!officialStampBox) return;
-
-  const preset = signStudioState.officialPreset || 'title_name';
-  const isRound = stampBorderType && stampBorderType.value === 'round';
-  const border = stampBorderType ? stampBorderType.value : 'single';
-  const color = signStudioState.officialColor || '#c81e1e';
-  const angle = rngOfficialAngle ? (parseFloat(rngOfficialAngle.value) || 0) : 0;
-  const hasDate = chkOfficialDate ? chkOfficialDate.checked : false;
-
-  let title = (stampOfficialTitle ? stampOfficialTitle.value : '').trim();
-  let name = (stampOfficialName ? stampOfficialName.value : '').trim() || 'NGUYỄN VĂN AN';
-  let extra = (stampOfficialExtra ? stampOfficialExtra.value : '').trim();
+function getOfficialStampFields() {
+  const isRound = !!(stampBorderType && stampBorderType.value === 'round');
+  const rawTitle = (stampOfficialTitle ? stampOfficialTitle.value : '').trim();
+  const rawName = (stampOfficialName ? stampOfficialName.value : '').trim();
+  const rawExtra = (stampOfficialExtra ? stampOfficialExtra.value : '').trim();
+  const titleVisible = isRound || !groupOfficialTitle || groupOfficialTitle.style.display !== 'none';
+  const extraVisible = isRound || !!(groupOfficialExtra && groupOfficialExtra.style.display !== 'none');
+  const hasDate = !!(chkOfficialDate && chkOfficialDate.checked);
   let dateText = '';
-
   if (hasDate) {
     const dateVal = inputOfficialDate ? inputOfficialDate.value : '';
     const formatType = selOfficialDateFormat ? selOfficialDateFormat.value : 'full';
     dateText = formatOfficialDateString(dateVal, formatType);
   }
+  return {
+    title: titleVisible ? rawTitle : '',
+    name: rawName || (isRound ? 'THÀNH PHỐ HÀ NỘI' : 'NGUYỄN VĂN AN'),
+    extra: extraVisible ? rawExtra : '',
+    hasDate,
+    dateText,
+    isRound,
+  };
+}
 
+function updateOfficialStampPreview() {
+  if (!officialStampBox) return;
+
+  const fields = getOfficialStampFields();
+  const border = stampBorderType ? stampBorderType.value : 'single';
+  const color = signStudioState.officialColor || '#c81e1e';
+  const angle = rngOfficialAngle ? (parseFloat(rngOfficialAngle.value) || 0) : 0;
+  const radius = rngOfficialRadius ? Math.max(0, parseInt(rngOfficialRadius.value, 10) || 0) : 0;
+  const radiusApplicable = border === 'single' || border === 'double' || border === 'rounded';
+  const { title, name, extra, hasDate, dateText } = fields;
+  const isRound = fields.isRound;
   officialStampBox.style.color = color;
   officialStampBox.style.borderColor = color;
   officialStampBox.style.transform = `rotate(${angle}deg)`;
+  officialStampBox.style.borderRadius = border === 'round' ? '50%' : (border === 'none' ? '0px' : `${radius}px`);
+  if (rngOfficialRadius) rngOfficialRadius.disabled = !radiusApplicable;
 
   officialStampBox.classList.remove(
     'official-border-single',
@@ -5056,7 +5342,7 @@ function updateOfficialStampPreview() {
     if (previewOfficialTitle) {
       previewOfficialTitle.style.display = 'block';
       previewOfficialTitle.style.fontSize = '0.72rem';
-      previewOfficialTitle.textContent = (title || 'CÔNG TY TNHH PHÁT TRIỂN').toUpperCase();
+      previewOfficialTitle.textContent = (title || 'CÔNG TY TNHH PHÁT TRIỂN CÔNG NGHỆ').toUpperCase();
     }
     if (previewOfficialName) {
       previewOfficialName.style.display = 'block';
@@ -5074,7 +5360,7 @@ function updateOfficialStampPreview() {
   } else {
     if (previewOfficialTitle) {
       previewOfficialTitle.style.fontSize = '0.92rem';
-      if (title && (preset === 'title_name' || preset === 'business_tax' || preset === 'doc_incoming' || (groupOfficialTitle && groupOfficialTitle.style.display !== 'none'))) {
+      if (title) {
         previewOfficialTitle.style.display = 'block';
         previewOfficialTitle.textContent = title.toUpperCase();
       } else {
@@ -5089,7 +5375,7 @@ function updateOfficialStampPreview() {
     }
 
     if (previewOfficialExtra) {
-      if (extra && (preset === 'business_tax' || (groupOfficialExtra && groupOfficialExtra.style.display !== 'none'))) {
+      if (extra) {
         previewOfficialExtra.style.display = 'block';
         previewOfficialExtra.textContent = extra;
       } else {
@@ -5144,7 +5430,8 @@ function renderStampLibrary() {
       card.classList.add('selected');
     }
     card.dataset.libId = item.id;
-    card.title = 'Nhấp để chọn con dấu này, rồi bấm "Đưa lên trang"';
+    card.title = 'Kéo vào trang hoặc nhấp để chọn';
+    card.draggable = true;
     card.innerHTML = `
       <div class="stamp-lib-thumb">
         <img src="${item.dataUrl}" alt="${escapeHtml(item.name || 'Con dấu')}">
@@ -5156,6 +5443,21 @@ function renderStampLibrary() {
         <button type="button" class="btn btn-tool btn-danger btn-sm btn-del-stamp" title="Xóa khỏi thư viện">Xóa</button>
       </div>
     `;
+
+    card.addEventListener('dragstart', (e) => {
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('application/x-pdfcraft-stamp-id', item.id);
+      e.dataTransfer.setData('text/plain', 'stamp:' + item.id);
+      card.classList.add('dragging-lib');
+      const thumb = card.querySelector('.stamp-lib-thumb img');
+      if (thumb && e.dataTransfer.setDragImage) {
+        try { e.dataTransfer.setDragImage(thumb, 24, 24); } catch (_) {}
+      }
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging-lib');
+      if (signStageViewport) signStageViewport.classList.remove('stamp-drop-over');
+    });
 
     // Chọn thẻ (không đặt dấu ngay) — nút "Đưa lên trang" sẽ dùng thẻ này.
     const selectThis = () => {
@@ -5346,6 +5648,9 @@ function selectStamp(stampId) {
   listItems.forEach(el => {
     el.classList.toggle('selected', el.dataset.stampId === stampId);
   });
+  if (stamp && signStudioState.activeTab === 'write') {
+    syncWritePanelFromAnnotation(stamp);
+  }
   updateFloatingToolbarPosition();
 }
 
@@ -5363,6 +5668,8 @@ function deselectStamps() {
 function updateSignPlaceButton() {
   if (!btnPlaceStampOnPage) return;
   const tab = signStudioState.activeTab;
+  btnPlaceStampOnPage.style.display = tab === 'write' ? 'none' : 'flex';
+  if (tab === 'write') return;
   let ready = false;
   let hint = 'Đưa lên trang';
 
@@ -5390,13 +5697,6 @@ function updateSignPlaceButton() {
   btnPlaceStampOnPage.title = hint;
   btnPlaceStampOnPage.setAttribute('aria-label', hint);
   btnPlaceStampOnPage.classList.toggle('is-ready', ready);
-}
-
-function updateStageEmptyHint() {
-  const hint = document.getElementById('signStageEmptyHint');
-  if (!hint) return;
-  const has = signStudioState.currentStamps.length > 0;
-  hint.hidden = has;
 }
 
 function flashStampPlaced(stampId) {
@@ -5447,6 +5747,7 @@ function setupSignatureEvents() {
     { btn: tabUpload, pane: paneUpload, id: 'upload' },
     { btn: tabType, pane: paneType, id: 'type' },
     { btn: tabOfficial, pane: paneOfficial, id: 'official' },
+    { btn: tabWrite, pane: paneWrite, id: 'write' },
   ];
 
   tabs.forEach(t => {
@@ -5462,6 +5763,7 @@ function setupSignatureEvents() {
         if (other.pane) other.pane.style.display = other.id === t.id ? 'flex' : 'none';
       });
       signStudioState.activeTab = t.id;
+      setWriteTool(signStudioState.writeTool);
       // Luôn về đầu panel khi đổi công cụ để thấy preview/ngữ cảnh mới ngay
       const scroller = document.querySelector('.sign-panel-scroll');
       if (scroller) scroller.scrollTop = 0;
@@ -5500,6 +5802,7 @@ function setupSignatureEvents() {
     if (!signModal || !signModal.classList.contains('active')) return;
     const activeEl = document.activeElement;
     if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) return;
+    if (signStudioState.activeTab === 'write') return;
     if (activeEl === btnPlaceStampOnPage) return; // button native click
     if (btnPlaceStampOnPage && !btnPlaceStampOnPage.disabled) {
       e.preventDefault();
@@ -5852,6 +6155,15 @@ function setupSignatureEvents() {
       updateOfficialStampPreview();
     });
   }
+  if (rngOfficialRadius) {
+    syncRangeFill(rngOfficialRadius);
+    if (lblOfficialRadius) lblOfficialRadius.textContent = `${rngOfficialRadius.value}px`;
+    rngOfficialRadius.addEventListener('input', () => {
+      syncRangeFill(rngOfficialRadius);
+      if (lblOfficialRadius) lblOfficialRadius.textContent = `${rngOfficialRadius.value}px`;
+      updateOfficialStampPreview();
+    });
+  }
 
   // Apply-all: nhãn cảnh báo trực quan khi bật (rủi ro cao nếu copy nhầm)
   if (chkApplyAllPages) {
@@ -5875,22 +6187,17 @@ function setupSignatureEvents() {
 
   if (btnSaveOfficialToLib) {
     btnSaveOfficialToLib.addEventListener('click', () => {
-      const isRound = stampBorderType && stampBorderType.value === 'round';
-      const title = (stampOfficialTitle ? stampOfficialTitle.value : '').trim();
-      const name = (stampOfficialName ? stampOfficialName.value : '').trim();
-      const extra = (stampOfficialExtra ? stampOfficialExtra.value : '').trim();
+      const fields = getOfficialStampFields();
+      const { title, name, extra, hasDate, dateText } = fields;
       if (!name && !title) {
         showToast('Vui lòng nhập nội dung con dấu trước khi lưu!', 'danger');
         return;
       }
       const border = stampBorderType ? stampBorderType.value : 'single';
       const color = signStudioState.officialColor || '#c81e1e';
-      const hasDate = chkOfficialDate ? chkOfficialDate.checked : false;
-      const dateVal = inputOfficialDate ? inputOfficialDate.value : '';
-      const formatType = selOfficialDateFormat ? selOfficialDateFormat.value : 'full';
-      const dateText = hasDate ? formatOfficialDateString(dateVal, formatType) : '';
       const hasGrunge = chkOfficialGrunge ? chkOfficialGrunge.checked : true;
       const angle = rngOfficialAngle ? (parseFloat(rngOfficialAngle.value) || 0) : 0;
+      const cornerRadius = rngOfficialRadius ? Math.max(0, parseInt(rngOfficialRadius.value, 10) || 0) : 0;
 
       let dataUrl = null;
       try {
@@ -5900,6 +6207,7 @@ function setupSignatureEvents() {
           extra,
           borderType: border,
           color,
+          cornerRadius,
           hasDate,
           dateText,
           hasGrunge,
@@ -6066,6 +6374,41 @@ function setupSignatureEvents() {
     });
   }
 
+  // 9b. Kéo thả ảnh từ thư viện trực tiếp vào vị trí trên trang
+  if (signStageViewport) {
+    const isStampDrag = (e) => !!(e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('application/x-pdfcraft-stamp-id'));
+    signStageViewport.addEventListener('dragenter', (e) => {
+      if (!isStampDrag(e)) return;
+      e.preventDefault();
+      signStageViewport.classList.add('stamp-drop-over');
+    });
+    signStageViewport.addEventListener('dragover', (e) => {
+      if (!isStampDrag(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      signStageViewport.classList.add('stamp-drop-over');
+    });
+    signStageViewport.addEventListener('dragleave', (e) => {
+      if (!isStampDrag(e)) return;
+      if (e.relatedTarget && signStageViewport.contains(e.relatedTarget)) return;
+      signStageViewport.classList.remove('stamp-drop-over');
+    });
+    signStageViewport.addEventListener('drop', (e) => {
+      if (!isStampDrag(e)) return;
+      e.preventDefault();
+      signStageViewport.classList.remove('stamp-drop-over');
+      const libId = e.dataTransfer.getData('application/x-pdfcraft-stamp-id');
+      const item = getStoredStampLibrary().find(x => x.id === libId);
+      if (!item || !signStageOverlay) return;
+      const rect = signStageOverlay.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+      if (x < 0 || x > 1 || y < 0 || y > 1) return;
+      addStampToCurrentPage(item.dataUrl, { x, y });
+    });
+  }
+
   // Wheel Zoom & Double click
   if (signStageViewport) {
     signStageViewport.addEventListener('wheel', (e) => {
@@ -6207,6 +6550,7 @@ function setupSignatureEvents() {
 }
 
 function handlePlaceStampOnPage() {
+  if (signStudioState.activeTab === 'write') return;
   if (btnPlaceStampOnPage && btnPlaceStampOnPage.disabled) return;
   let dataUrl = null;
 
@@ -6247,22 +6591,17 @@ function handlePlaceStampOnPage() {
     tCtx.fillText(name, tempCanvas.width / 2, tempCanvas.height / 2);
     dataUrl = cropCanvasBoundingBox(tempCanvas);
   } else if (signStudioState.activeTab === 'official') {
-    const isRound = stampBorderType && stampBorderType.value === 'round';
-    const title = (stampOfficialTitle ? stampOfficialTitle.value : '').trim();
-    const name = (stampOfficialName ? stampOfficialName.value : '').trim();
-    const extra = (stampOfficialExtra ? stampOfficialExtra.value : '').trim();
+    const fields = getOfficialStampFields();
+    const { title, name, extra, hasDate, dateText } = fields;
     if (!name && !title) {
       showToast('Vui lòng nhập nội dung con dấu!', 'danger');
       return;
     }
     const border = stampBorderType ? stampBorderType.value : 'single';
     const color = signStudioState.officialColor || '#c81e1e';
-    const hasDate = chkOfficialDate ? chkOfficialDate.checked : false;
-    const dateVal = inputOfficialDate ? inputOfficialDate.value : '';
-    const formatType = selOfficialDateFormat ? selOfficialDateFormat.value : 'full';
-    const dateText = hasDate ? formatOfficialDateString(dateVal, formatType) : '';
     const hasGrunge = chkOfficialGrunge ? chkOfficialGrunge.checked : true;
     const angle = rngOfficialAngle ? (parseFloat(rngOfficialAngle.value) || 0) : 0;
+    const cornerRadius = rngOfficialRadius ? Math.max(0, parseInt(rngOfficialRadius.value, 10) || 0) : 0;
 
     try {
       dataUrl = generateOfficialStampDataUrl({
@@ -6271,6 +6610,7 @@ function handlePlaceStampOnPage() {
         extra,
         borderType: border,
         color,
+        cornerRadius,
         hasDate,
         dateText,
         hasGrunge,
@@ -6287,7 +6627,7 @@ function handlePlaceStampOnPage() {
   addStampToCurrentPage(dataUrl);
 }
 
-function addStampToCurrentPage(dataUrl) {
+function addStampToCurrentPage(dataUrl, position) {
   const pageItem = state.pages[signStudioState.pageIndex];
   if (!pageItem) return;
 
@@ -6305,8 +6645,12 @@ function addStampToCurrentPage(dataUrl) {
     const pixelH = pixelW / aspect;
     const relH = Math.min(0.45, pixelH / displayH);
 
-    const relX = Math.max(0.04, Math.min(0.66, 0.96 - relW));
-    const relY = Math.max(0.04, Math.min(0.72, 0.96 - relH));
+    let relX = Math.max(0.04, Math.min(0.66, 0.96 - relW));
+    let relY = Math.max(0.04, Math.min(0.72, 0.96 - relH));
+    if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) {
+      relX = Math.max(0.01, Math.min(0.99 - relW, position.x - relW / 2));
+      relY = Math.max(0.01, Math.min(0.99 - relH, position.y - relH / 2));
+    }
     const opacity = (parseInt(signOpacity ? signOpacity.value : 100, 10) || 100) / 100.0;
 
     const newStamp = {
@@ -6326,7 +6670,7 @@ function addStampToCurrentPage(dataUrl) {
     renderSignStampsList();
     selectStamp(newStamp.id);
     flashStampPlaced(newStamp.id);
-    showToast('Đã đặt con dấu / chữ ký lên trang! Hãy kéo di chuyển, xoay hoặc co giãn.', 'success');
+    showToast('Đã đặt con dấu lên trang.', 'success');
   };
   img.src = dataUrl;
 }
@@ -6337,8 +6681,7 @@ function openSignStudio(pageIndex) {
     return;
   }
 
-  // Tải lười font chữ ký nghệ thuật và thư viện pdf-lib khi người dùng mở Sign Studio
-  ensureCursiveFontsLoaded();
+  // Tải lười thư viện pdf-lib khi người dùng mở Sign Studio
   ensurePdfLibLoaded().catch(() => {});
 
   if (pageIndex === undefined || pageIndex === null || pageIndex < 0 || pageIndex >= state.pages.length) {
@@ -6394,7 +6737,6 @@ function openSignStudio(pageIndex) {
 
   try {
     updateSignPlaceButton();
-    updateStageEmptyHint();
   } catch (err) {
     console.warn('Lỗi khi cập nhật nút Place:', err);
   }
@@ -6499,6 +6841,11 @@ async function renderSignStage() {
 
     signStageCanvas.width = Math.max(1, Math.floor(viewport.width));
     signStageCanvas.height = Math.max(1, Math.floor(viewport.height));
+    if (signDrawCanvas) {
+      signDrawCanvas.width = signStageCanvas.width;
+      signDrawCanvas.height = signStageCanvas.height;
+      clearSignDrawCanvas();
+    }
     const ctx = signStageCanvas.getContext('2d');
     const renderTask = page.render({ canvasContext: ctx, viewport });
     signStageCanvas._pdfRenderTask = renderTask;
@@ -6556,7 +6903,6 @@ function renderSignStageStamps() {
     signStageOverlay.appendChild(box);
   });
 
-  updateStageEmptyHint();
   updateFloatingToolbarPosition();
 }
 
@@ -6682,6 +7028,15 @@ function setupStampBoxInteractivity(boxEl, stamp) {
     if (isResizing) {
       isResizing = false;
       currentHandle = null;
+      if (stamp.type === 'shape' && stamp.meta) {
+        const pageItem = state.pages[signStudioState.pageIndex];
+        if (pageItem) {
+          stamp.dataUrl = renderShapeImage(stamp.meta, stamp.relW, stamp.relH, pageItem);
+          delete stamp._img;
+          const img = boxEl.querySelector('.stamp-box-img');
+          if (img) img.src = stamp.dataUrl;
+        }
+      }
       updateFloatingToolbarPosition();
     }
     window.removeEventListener('pointermove', onPointerMove);
@@ -6803,7 +7158,7 @@ function renderSignStampsList() {
   }
 
   if (count === 0) {
-    signStampsList.innerHTML = '<div class="sign-empty-hint">Chưa có chữ ký hoặc con dấu nào trên trang này.</div>';
+    signStampsList.innerHTML = '';
     if (btnClearPageStamps) btnClearPageStamps.style.display = 'none';
     return;
   }
@@ -6842,6 +7197,621 @@ function renderSignStampsList() {
     }
     signStampsList.appendChild(item);
   });
+}
+
+// ==========================================================================
+// Write & draw: shape, text and pen annotations (transparent PNG like stamps)
+// ==========================================================================
+
+function pageDisplaySize(pageItem) {
+  const isSwapped = ((pageItem.rotation || 0) / 90) % 2 !== 0;
+  return {
+    width: Math.max(1, isSwapped ? pageItem.height : pageItem.width),
+    height: Math.max(1, isSwapped ? pageItem.width : pageItem.height),
+  };
+}
+
+function annotationOpacityValue() {
+  return (parseInt(signOpacity ? signOpacity.value : 100, 10) || 100) / 100;
+}
+
+function traceRoundedRect(ctx, x, y, w, h, radius) {
+  const r = Math.max(0, Math.min(radius, Math.min(w, h) / 2));
+  ctx.beginPath();
+  if (r <= 0) {
+    ctx.rect(x, y, w, h);
+    return;
+  }
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+function renderShapeImage(meta, relW, relH, pageItem) {
+  const dims = pageDisplaySize(pageItem);
+  const scale = 2;
+  const cw = Math.max(24, Math.round(dims.width * relW * scale));
+  const ch = Math.max(24, Math.round(dims.height * relH * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = cw;
+  canvas.height = ch;
+  const ctx = canvas.getContext('2d');
+  const bw = Math.max(1, meta.borderWidth * scale);
+  const x = bw / 2;
+  const y = bw / 2;
+  const w = Math.max(1, cw - bw);
+  const h = Math.max(1, ch - bw);
+  traceRoundedRect(ctx, x, y, w, h, meta.radius * scale);
+  if (meta.fillColor) {
+    ctx.fillStyle = meta.fillColor;
+    ctx.fill();
+  }
+  ctx.lineWidth = bw;
+  ctx.strokeStyle = meta.borderColor;
+  ctx.stroke();
+  return canvas.toDataURL('image/png');
+}
+
+function renderTextImage(meta) {
+  const scale = 2;
+  const fontPx = Math.max(10, meta.fontSize) * scale;
+  const lines = String(meta.text || '').split(/\n/);
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.font = `600 ${fontPx}px ${meta.fontFamily}`;
+  const widths = lines.map(line => ctx.measureText(line).width);
+  const lineH = Math.round(fontPx * 1.3);
+  const pad = Math.round(fontPx * 0.25);
+  const w = Math.ceil(Math.max(1, ...widths) + pad * 2);
+  const h = Math.ceil(lineH * Math.max(1, lines.length) + pad * 2);
+  canvas.width = w;
+  canvas.height = h;
+  ctx.font = `600 ${fontPx}px ${meta.fontFamily}`;
+  ctx.fillStyle = meta.color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  lines.forEach((line, i) => ctx.fillText(line, w / 2, pad + lineH * (i + 0.5)));
+  return { dataUrl: canvas.toDataURL('image/png'), width: w / scale, height: h / scale };
+}
+
+function addWriteAnnotation({ type, dataUrl, relW, relH, meta, relX, relY, silent }) {
+  if (!dataUrl) return null;
+  const pageItem = state.pages[signStudioState.pageIndex];
+  if (!pageItem) return null;
+  const w = Math.max(0.03, Math.min(0.94, relW));
+  const h = Math.max(0.03, Math.min(0.94, relH));
+  const x = relX !== undefined ? Math.max(0, Math.min(1 - w, relX)) : (1 - w) / 2;
+  const y = relY !== undefined ? Math.max(0, Math.min(1 - h, relY)) : (1 - h) / 2;
+  const annotation = {
+    id: 'ann_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+    type,
+    dataUrl,
+    relX: x,
+    relY: y,
+    relW: w,
+    relH: h,
+    rotation: 0,
+    opacity: annotationOpacityValue(),
+    meta: meta || {},
+  };
+  signStudioState.currentStamps.push(annotation);
+  renderSignStageStamps();
+  renderSignStampsList();
+  selectStamp(annotation.id);
+  if (!silent) {
+    showToast(type === 'shape' ? 'Đã thêm hình.' : type === 'text' ? 'Đã thêm chữ.' : 'Đã thêm nét vẽ.', 'success');
+  }
+  return annotation;
+}
+
+function addShapeAnnotation() {
+  const pageItem = state.pages[signStudioState.pageIndex];
+  if (!pageItem) return;
+  const dims = pageDisplaySize(pageItem);
+  const relW = 0.35;
+  const relH = Math.max(0.06, Math.min(0.6, (relW * dims.width) / (1.8 * dims.height)));
+  const meta = {
+    borderColor: signStudioState.shapeColor,
+    fillColor: chkShapeFill && chkShapeFill.checked ? signStudioState.shapeFillColor : null,
+    borderWidth: parseInt(rngShapeBorder ? rngShapeBorder.value : '3', 10) || 3,
+    radius: parseInt(rngShapeRadius ? rngShapeRadius.value : '0', 10) || 0,
+  };
+  addWriteAnnotation({
+    type: 'shape',
+    dataUrl: renderShapeImage(meta, relW, relH, pageItem),
+    relW,
+    relH,
+    meta,
+  });
+}
+
+function addTextAnnotation() {
+  const text = writeTextInput ? writeTextInput.value.trim() : '';
+  if (!text) {
+    showToast('Vui lòng nhập chữ trước khi thêm!', 'danger');
+    return;
+  }
+  const pageItem = state.pages[signStudioState.pageIndex];
+  if (!pageItem) return;
+  const dims = pageDisplaySize(pageItem);
+  const meta = {
+    text,
+    fontFamily: writeFontSelect ? writeFontSelect.value : 'Arial, sans-serif',
+    fontSize: parseInt(rngWriteFontSize ? rngWriteFontSize.value : '24', 10) || 24,
+    color: signStudioState.writeTextColor,
+  };
+  const img = renderTextImage(meta);
+  let relW = img.width / dims.width;
+  let relH = img.height / dims.height;
+  if (relW > 0.9) {
+    const factor = 0.9 / relW;
+    relW *= factor;
+    relH *= factor;
+  }
+  addWriteAnnotation({ type: 'text', dataUrl: img.dataUrl, relW, relH, meta });
+}
+
+function prepareSignDrawCanvas() {
+  if (!signDrawCanvas || !signStageCanvas) return;
+  if (signDrawCanvas.width !== signStageCanvas.width || signDrawCanvas.height !== signStageCanvas.height) {
+    signDrawCanvas.width = signStageCanvas.width;
+    signDrawCanvas.height = signStageCanvas.height;
+  }
+  clearSignDrawCanvas();
+}
+
+function clearSignDrawCanvas() {
+  if (!signDrawCanvas) return;
+  const ctx = signDrawCanvas.getContext('2d');
+  if (ctx) ctx.clearRect(0, 0, signDrawCanvas.width, signDrawCanvas.height);
+}
+
+function setWriteTool(tool) {
+  const next = ['shape', 'text', 'pen'].includes(tool) ? tool : 'shape';
+  signStudioState.writeTool = next;
+  [toolShape, toolText, toolPen].forEach(btn => {
+    if (btn) btn.classList.toggle('active', btn.dataset.writeTool === next);
+  });
+  if (writeShapePanel) writeShapePanel.style.display = next === 'shape' ? 'block' : 'none';
+  if (writeTextPanel) writeTextPanel.style.display = next === 'text' ? 'block' : 'none';
+  if (writePenPanel) writePenPanel.style.display = next === 'pen' ? 'block' : 'none';
+
+  const penActive = signStudioState.activeTab === 'write' && next === 'pen';
+  if (signDrawCanvas) {
+    signDrawCanvas.classList.toggle('pen-active', penActive);
+    signDrawCanvas.style.pointerEvents = penActive ? 'auto' : 'none';
+  }
+  if (signStageOverlay) signStageOverlay.style.pointerEvents = penActive ? 'none' : '';
+  if (penActive) {
+    deselectStamps();
+    prepareSignDrawCanvas();
+  } else {
+    clearSignDrawCanvas();
+  }
+}
+
+function moveSelectedAnnotationLayer(delta) {
+  const id = signStudioState.selectedStampId;
+  if (!id) return;
+  const arr = signStudioState.currentStamps;
+  const idx = arr.findIndex(s => s.id === id);
+  if (idx === -1) return;
+  const target = Math.max(0, Math.min(arr.length - 1, idx + delta));
+  if (target === idx) return;
+  const [item] = arr.splice(idx, 1);
+  arr.splice(target, 0, item);
+  renderSignStageStamps();
+  selectStamp(id);
+  renderSignStampsList();
+}
+
+function removeLastPenStroke() {
+  const arr = signStudioState.currentStamps;
+  const idx = arr.map(s => s.type).lastIndexOf('draw');
+  if (idx === -1) {
+    showToast('Chưa có nét vẽ nào để xóa.', 'info');
+    return;
+  }
+  const [removed] = arr.splice(idx, 1);
+  if (removed && signStudioState.selectedStampId === removed.id) deselectStamps();
+  renderSignStageStamps();
+  renderSignStampsList();
+}
+
+function clearPenStrokes() {
+  const before = signStudioState.currentStamps.length;
+  signStudioState.currentStamps = signStudioState.currentStamps.filter(s => s.type !== 'draw');
+  if (signStudioState.currentStamps.length === before) {
+    showToast('Chưa có nét vẽ nào để xóa.', 'info');
+    return;
+  }
+  deselectStamps();
+  renderSignStageStamps();
+  renderSignStampsList();
+}
+
+function renderWriteColorPicker(container, attr, colors, value, label, preview) {
+  if (!container) return;
+  container.dataset.colorLabel = label;
+  container.dataset.colorPreview = preview;
+  const svgElement = (tag, attributes) => {
+    const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    Object.entries(attributes).forEach(([name, attributeValue]) => element.setAttribute(name, attributeValue));
+    return element;
+  };
+
+  const details = document.createElement('details');
+  details.className = 'write-color-picker';
+  const summary = document.createElement('summary');
+  summary.className = 'write-color-summary';
+  summary.setAttribute('aria-label', label);
+  const current = document.createElement('span');
+  current.className = 'write-color-current';
+  current.setAttribute('aria-hidden', 'true');
+  const name = document.createElement('span');
+  name.className = 'write-color-name';
+  const chevron = svgElement('svg', {
+    width: 12, height: 12, viewBox: '0 0 24 24', fill: 'none',
+    stroke: 'currentColor', 'stroke-width': 2, 'aria-hidden': 'true',
+  });
+  chevron.appendChild(svgElement('polyline', { points: '6 9 12 15 18 9' }));
+  summary.append(current, name, chevron);
+
+  const popover = document.createElement('div');
+  popover.className = 'write-color-popover';
+  const grid = document.createElement('div');
+  grid.className = 'write-color-grid';
+  grid.setAttribute('role', 'group');
+  grid.setAttribute('aria-label', label);
+  const previewSvg = svgElement('svg', {
+    class: 'write-color-preview', viewBox: '0 0 192 52', fill: 'none', 'aria-hidden': 'true',
+  });
+  previewSvg.appendChild(svgElement('path', {
+    class: 'write-preview-stroke', d: 'M8 28C28 6 44 6 64 28s36 22 56 0 36-22 64 0',
+    stroke: 'currentColor', 'stroke-width': 3, 'stroke-linecap': 'round',
+  }));
+  previewSvg.appendChild(svgElement('rect', {
+    class: 'write-preview-fill', x: 8, y: 8, width: 176, height: 36, rx: 8, fill: 'currentColor',
+  }));
+  popover.append(grid, previewSvg);
+  details.append(summary, popover);
+  details.addEventListener('toggle', () => {
+    if (!details.open) return;
+    requestAnimationFrame(() => {
+      const preview = details.querySelector('.write-color-preview');
+      if (preview) preview.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    });
+  });
+  container.replaceChildren(details);
+
+  colors.forEach(color => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'write-color-swatch';
+    button.setAttribute(attr, color.value);
+    button.style.setProperty('--swatch-color', color.value);
+    button.title = color.name;
+    button.setAttribute('aria-label', color.name);
+    button.setAttribute('aria-pressed', 'false');
+    grid.appendChild(button);
+  });
+  setColorPickerActive(container, attr, value);
+}
+
+function bindWriteColorPicker(container, attr, onPick) {
+  if (!container) return;
+  container.addEventListener('click', event => {
+    const dot = event.target.closest(`[${attr}]`);
+    if (!dot || !container.contains(dot)) return;
+    const value = dot.getAttribute(attr);
+    onPick(value);
+    setColorPickerActive(container, attr, value);
+    const details = container.querySelector('details');
+    const summary = container.querySelector('.write-color-summary');
+    if (details) details.removeAttribute('open');
+    if (summary) summary.focus({ preventScroll: true });
+  });
+}
+
+function getSelectedWriteAnnotation() {
+  const id = signStudioState.selectedStampId;
+  if (!id) return null;
+  return signStudioState.currentStamps.find(s => s.id === id) || null;
+}
+
+function setColorPickerActive(container, attr, value) {
+  if (!container) return;
+  let activeButton = null;
+  container.querySelectorAll(`[${attr}]`).forEach(button => {
+    const selected = String(button.getAttribute(attr)).toLowerCase() === String(value).toLowerCase();
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-pressed', String(selected));
+    if (selected) activeButton = button;
+  });
+  const color = activeButton ? activeButton.getAttribute(attr) : value;
+  const colorName = activeButton ? activeButton.title : 'Màu tùy chọn';
+  const current = container.querySelector('.write-color-current');
+  const name = container.querySelector('.write-color-name');
+  const summary = container.querySelector('.write-color-summary');
+  const preview = container.querySelector('.write-color-preview');
+  if (current) current.style.backgroundColor = color || 'transparent';
+  if (name) name.textContent = colorName;
+  if (summary) summary.setAttribute('aria-label', `${container.dataset.colorLabel}: ${colorName}`);
+  if (preview) preview.style.color = color || 'var(--text-primary)';
+}
+
+function refreshAnnotationBoxImage(annotation, updateGeometry) {
+  if (!annotation) return;
+  delete annotation._img;
+  const box = signStageOverlay ? signStageOverlay.querySelector(`.stamp-box[data-stamp-id="${annotation.id}"]`) : null;
+  if (!box) return;
+  const img = box.querySelector('.stamp-box-img');
+  if (img) img.src = annotation.dataUrl;
+  if (updateGeometry) {
+    box.style.left = `${annotation.relX * 100}%`;
+    box.style.top = `${annotation.relY * 100}%`;
+    box.style.width = `${annotation.relW * 100}%`;
+    box.style.height = `${annotation.relH * 100}%`;
+  }
+  updateFloatingToolbarPosition();
+}
+
+function syncWritePanelFromAnnotation(annotation) {
+  if (!annotation) return;
+  if (annotation.type === 'shape') {
+    const meta = annotation.meta || {};
+    setWriteTool('shape');
+    signStudioState.shapeColor = meta.borderColor || signStudioState.shapeColor;
+    signStudioState.shapeFillColor = meta.fillColor || signStudioState.shapeFillColor;
+    setColorPickerActive(shapeColorPicker, 'data-write-color', signStudioState.shapeColor);
+    setColorPickerActive(shapeFillPicker, 'data-fill-color', signStudioState.shapeFillColor);
+    if (chkShapeFill) chkShapeFill.checked = !!meta.fillColor;
+    if (shapeFillPicker) shapeFillPicker.style.display = meta.fillColor ? 'flex' : 'none';
+    if (rngShapeBorder) rngShapeBorder.value = String(meta.borderWidth || 3);
+    if (lblShapeBorder) lblShapeBorder.textContent = `${rngShapeBorder ? rngShapeBorder.value : 3}px`;
+    if (rngShapeRadius) rngShapeRadius.value = String(meta.radius || 0);
+    if (lblShapeRadius) lblShapeRadius.textContent = `${rngShapeRadius ? rngShapeRadius.value : 0}px`;
+  } else if (annotation.type === 'text') {
+    const meta = annotation.meta || {};
+    setWriteTool('text');
+    signStudioState.writeTextColor = meta.color || signStudioState.writeTextColor;
+    if (writeTextInput) writeTextInput.value = meta.text || '';
+    if (writeFontSelect) writeFontSelect.value = meta.fontFamily || 'Arial, sans-serif';
+    if (rngWriteFontSize) rngWriteFontSize.value = String(meta.fontSize || 24);
+    if (lblWriteFontSize) lblWriteFontSize.textContent = `${rngWriteFontSize ? rngWriteFontSize.value : 24}pt`;
+    setColorPickerActive(writeTextColorPicker, 'data-write-text-color', signStudioState.writeTextColor);
+  }
+}
+
+function applyShapeControlsToSelected() {
+  const annotation = getSelectedWriteAnnotation();
+  if (!annotation || annotation.type !== 'shape') return;
+  const pageItem = state.pages[signStudioState.pageIndex];
+  if (!pageItem) return;
+  annotation.meta = {
+    ...(annotation.meta || {}),
+    borderColor: signStudioState.shapeColor,
+    fillColor: chkShapeFill && chkShapeFill.checked ? signStudioState.shapeFillColor : null,
+    borderWidth: parseInt(rngShapeBorder ? rngShapeBorder.value : '3', 10) || 3,
+    radius: parseInt(rngShapeRadius ? rngShapeRadius.value : '0', 10) || 0,
+  };
+  annotation.dataUrl = renderShapeImage(annotation.meta, annotation.relW, annotation.relH, pageItem);
+  refreshAnnotationBoxImage(annotation, false);
+}
+
+function applyTextControlsToSelected() {
+  const annotation = getSelectedWriteAnnotation();
+  if (!annotation || annotation.type !== 'text') return;
+  const pageItem = state.pages[signStudioState.pageIndex];
+  const text = writeTextInput ? writeTextInput.value.trim() : '';
+  if (!pageItem || !text) return;
+  const meta = {
+    ...(annotation.meta || {}),
+    text,
+    fontFamily: writeFontSelect ? writeFontSelect.value : 'Arial, sans-serif',
+    fontSize: parseInt(rngWriteFontSize ? rngWriteFontSize.value : '24', 10) || 24,
+    color: signStudioState.writeTextColor,
+  };
+  const img = renderTextImage(meta);
+  const dims = pageDisplaySize(pageItem);
+  let relW = img.width / dims.width;
+  let relH = img.height / dims.height;
+  if (relW > 0.9) {
+    const factor = 0.9 / relW;
+    relW *= factor;
+    relH *= factor;
+  }
+  const centerX = annotation.relX + annotation.relW / 2;
+  const centerY = annotation.relY + annotation.relH / 2;
+  annotation.relW = Math.max(0.03, Math.min(0.94, relW));
+  annotation.relH = Math.max(0.03, Math.min(0.94, relH));
+  annotation.relX = Math.max(0, Math.min(1 - annotation.relW, centerX - annotation.relW / 2));
+  annotation.relY = Math.max(0, Math.min(1 - annotation.relH, centerY - annotation.relH / 2));
+  annotation.meta = meta;
+  annotation.dataUrl = img.dataUrl;
+  refreshAnnotationBoxImage(annotation, true);
+}
+
+function setupWriteTools() {
+  [toolShape, toolText, toolPen].forEach(btn => {
+    if (!btn) return;
+    btn.addEventListener('click', () => setWriteTool(btn.dataset.writeTool));
+  });
+
+  renderWriteColorPicker(shapeColorPicker, 'data-write-color', WRITE_INK_COLORS, signStudioState.shapeColor, 'Màu viền', 'stroke');
+  renderWriteColorPicker(shapeFillPicker, 'data-fill-color', WRITE_FILL_COLORS, signStudioState.shapeFillColor, 'Màu nền', 'fill');
+  renderWriteColorPicker(writeTextColorPicker, 'data-write-text-color', WRITE_INK_COLORS, signStudioState.writeTextColor, 'Màu chữ', 'stroke');
+  renderWriteColorPicker(penColorPicker, 'data-pen-color', WRITE_INK_COLORS, signStudioState.penColor, 'Màu bút', 'stroke');
+
+  bindWriteColorPicker(shapeColorPicker, 'data-write-color', value => {
+    signStudioState.shapeColor = value;
+    applyShapeControlsToSelected();
+  });
+  bindWriteColorPicker(shapeFillPicker, 'data-fill-color', value => {
+    signStudioState.shapeFillColor = value;
+    applyShapeControlsToSelected();
+  });
+  bindWriteColorPicker(writeTextColorPicker, 'data-write-text-color', value => {
+    signStudioState.writeTextColor = value;
+    applyTextControlsToSelected();
+  });
+  bindWriteColorPicker(penColorPicker, 'data-pen-color', value => { signStudioState.penColor = value; });
+
+  if (chkShapeFill && shapeFillPicker) {
+    chkShapeFill.addEventListener('change', () => {
+      shapeFillPicker.style.display = chkShapeFill.checked ? 'flex' : 'none';
+      applyShapeControlsToSelected();
+    });
+  }
+
+  const syncRange = (range, label, suffix, onChange) => {
+    if (!range) return;
+    syncRangeFill(range);
+    const update = () => {
+      syncRangeFill(range);
+      if (label) label.textContent = `${range.value}${suffix}`;
+      if (onChange) onChange();
+    };
+    range.addEventListener('input', update);
+    update();
+  };
+  syncRange(rngShapeBorder, lblShapeBorder, 'px', applyShapeControlsToSelected);
+  syncRange(rngShapeRadius, lblShapeRadius, 'px', applyShapeControlsToSelected);
+  syncRange(rngWriteFontSize, lblWriteFontSize, 'pt', applyTextControlsToSelected);
+  syncRange(rngPenWidth, lblPenWidth, 'px');
+
+  if (writeTextInput) writeTextInput.addEventListener('input', applyTextControlsToSelected);
+  if (writeFontSelect) writeFontSelect.addEventListener('change', applyTextControlsToSelected);
+
+  if (btnAddShape) btnAddShape.addEventListener('click', addShapeAnnotation);
+  if (btnAddText) btnAddText.addEventListener('click', addTextAnnotation);
+  if (btnUndoStroke) btnUndoStroke.addEventListener('click', removeLastPenStroke);
+  if (btnClearStrokes) btnClearStrokes.addEventListener('click', clearPenStrokes);
+  if (btnFloatForward) btnFloatForward.addEventListener('click', () => moveSelectedAnnotationLayer(1));
+  if (btnFloatBackward) btnFloatBackward.addEventListener('click', () => moveSelectedAnnotationLayer(-1));
+
+  if (signDrawCanvas) {
+    let penDrawing = false;
+    let penPoints = [];
+    const isPenActive = () => signStudioState.activeTab === 'write' && signStudioState.writeTool === 'pen';
+    const canvasPoint = (e) => {
+      const rect = signDrawCanvas.getBoundingClientRect();
+      return {
+        x: ((e.clientX - rect.left) / Math.max(1, rect.width)) * signDrawCanvas.width,
+        y: ((e.clientY - rect.top) / Math.max(1, rect.height)) * signDrawCanvas.height,
+      };
+    };
+    const drawPenLive = () => {
+      const ctx = signDrawCanvas.getContext('2d');
+      if (!ctx) return;
+      ctx.clearRect(0, 0, signDrawCanvas.width, signDrawCanvas.height);
+      if (!penPoints.length) return;
+      const rect = signDrawCanvas.getBoundingClientRect();
+      const scale = signDrawCanvas.width / Math.max(1, rect.width);
+      const lineWidth = Math.max(1, parseInt(rngPenWidth ? rngPenWidth.value : '3', 10) || 3) * scale;
+      ctx.save();
+      ctx.globalAlpha = annotationOpacityValue();
+      ctx.strokeStyle = signStudioState.penColor;
+      ctx.fillStyle = signStudioState.penColor;
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      if (penPoints.length === 1) {
+        const p = penPoints[0];
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, lineWidth / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        penPoints.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+        ctx.stroke();
+      }
+      ctx.restore();
+    };
+    const commitPenStroke = (points) => {
+      if (!points.length) return;
+      const rect = signDrawCanvas.getBoundingClientRect();
+      const scale = signDrawCanvas.width / Math.max(1, rect.width);
+      const widthCss = Math.max(1, parseInt(rngPenWidth ? rngPenWidth.value : '3', 10) || 3);
+      const lineWidth = widthCss * scale;
+      const pad = lineWidth / 2 + 2;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      points.forEach(p => {
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+      });
+      const x0 = Math.max(0, minX - pad);
+      const y0 = Math.max(0, minY - pad);
+      const x1 = Math.min(signDrawCanvas.width, maxX + pad);
+      const y1 = Math.min(signDrawCanvas.height, maxY + pad);
+      const w = Math.max(2, x1 - x0);
+      const h = Math.max(2, y1 - y0);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.ceil(w);
+      canvas.height = Math.ceil(h);
+      const ctx = canvas.getContext('2d');
+      ctx.strokeStyle = signStudioState.penColor;
+      ctx.fillStyle = signStudioState.penColor;
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      if (points.length === 1) {
+        ctx.beginPath();
+        ctx.arc(points[0].x - x0, points[0].y - y0, lineWidth / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x - x0, p.y - y0) : ctx.lineTo(p.x - x0, p.y - y0)));
+        ctx.stroke();
+      }
+      addWriteAnnotation({
+        type: 'draw',
+        dataUrl: canvas.toDataURL('image/png'),
+        relX: x0 / signDrawCanvas.width,
+        relY: y0 / signDrawCanvas.height,
+        relW: w / signDrawCanvas.width,
+        relH: h / signDrawCanvas.height,
+        meta: { color: signStudioState.penColor, width: widthCss },
+        silent: true,
+      });
+      deselectStamps();
+      clearSignDrawCanvas();
+    };
+    signDrawCanvas.addEventListener('pointerdown', (e) => {
+      if (!isPenActive()) return;
+      e.preventDefault();
+      prepareSignDrawCanvas();
+      penDrawing = true;
+      penPoints = [canvasPoint(e)];
+      try { signDrawCanvas.setPointerCapture(e.pointerId); } catch (_) {}
+      drawPenLive();
+    });
+    signDrawCanvas.addEventListener('pointermove', (e) => {
+      if (!penDrawing || !isPenActive()) return;
+      e.preventDefault();
+      penPoints.push(canvasPoint(e));
+      drawPenLive();
+    });
+    const finishPen = (e) => {
+      if (!penDrawing) return;
+      penDrawing = false;
+      const points = penPoints;
+      penPoints = [];
+      drawPenLive();
+      commitPenStroke(points);
+    };
+    signDrawCanvas.addEventListener('pointerup', finishPen);
+    signDrawCanvas.addEventListener('pointercancel', finishPen);
+  }
+
+  setWriteTool(signStudioState.writeTool);
 }
 
 // Start application

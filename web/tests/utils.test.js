@@ -5,7 +5,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { LRUCache, escapeHtml, formatBytes, normalizeText, findTextMatches, remapOutlineTree } = require('../utils.js');
+const { LRUCache, escapeHtml, formatBytes, normalizeText, findTextMatches, remapOutlineTree, reorderPageBlock } = require('../utils.js');
 
 describe('LRUCache', () => {
   it('stores and retrieves values', () => {
@@ -132,5 +132,47 @@ describe('remapOutlineTree', () => {
     assert.deepEqual(tree, [
       { title: 'Heading', page: 4, kids: [{ title: 'Section', page: 4, kids: [] }] },
     ]);
+  });
+});
+
+describe('reorderPageBlock', () => {
+  const pages = ['a', 'b', 'c', 'd', 'e'].map(id => ({ id }));
+  const ids = orderedPages => orderedPages.map(page => page.id);
+
+  it('moves a contiguous block one position left or right', () => {
+    assert.deepEqual(ids(reorderPageBlock(pages, ['b', 'c'], 0)), ['b', 'c', 'a', 'd', 'e']);
+    assert.deepEqual(ids(reorderPageBlock(pages, ['b', 'c'], 2)), ['a', 'd', 'b', 'c', 'e']);
+  });
+
+  it('gathers non-contiguous pages at the collapsed block position', () => {
+    assert.deepEqual(ids(reorderPageBlock(pages, ['b', 'd'], 0)), ['b', 'd', 'a', 'c', 'e']);
+    assert.deepEqual(ids(reorderPageBlock(pages, ['b', 'd'], 1)), ['a', 'b', 'd', 'c', 'e']);
+    assert.deepEqual(ids(reorderPageBlock(pages, ['b', 'd'], 2)), ['a', 'c', 'b', 'd', 'e']);
+    assert.deepEqual(ids(reorderPageBlock(pages, ['b', 'd'], 3)), ['a', 'c', 'e', 'b', 'd']);
+  });
+
+  it('preserves current selected order regardless of moving ID order', () => {
+    assert.deepEqual(ids(reorderPageBlock(pages, new Set(['d', 'b']), 3)), ['a', 'c', 'e', 'b', 'd']);
+  });
+
+  it('preserves the relative order of unselected pages', () => {
+    assert.deepEqual(ids(reorderPageBlock(pages, ['b', 'd'], 2)), ['a', 'c', 'b', 'd', 'e']);
+  });
+
+  it('clamps insertion targets to the remaining-page boundaries', () => {
+    assert.deepEqual(ids(reorderPageBlock(pages, ['b', 'd'], -10)), ['b', 'd', 'a', 'c', 'e']);
+    assert.deepEqual(ids(reorderPageBlock(pages, ['b', 'd'], 99)), ['a', 'c', 'e', 'b', 'd']);
+  });
+
+  it('returns unchanged order when no pages or all pages are moving', () => {
+    assert.deepEqual(ids(reorderPageBlock(pages, [], 2)), ['a', 'b', 'c', 'd', 'e']);
+    assert.deepEqual(ids(reorderPageBlock(pages, ['a', 'b', 'c', 'd', 'e'], 2)), ['a', 'b', 'c', 'd', 'e']);
+  });
+
+  it('does not mutate the input array', () => {
+    const original = pages.map(page => ({ ...page }));
+    const result = reorderPageBlock(pages, ['b', 'd'], 2);
+    assert.deepEqual(pages, original);
+    assert.notEqual(result, pages);
   });
 });

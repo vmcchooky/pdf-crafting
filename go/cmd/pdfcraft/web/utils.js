@@ -143,6 +143,21 @@ function remapOutlineTree(items, outputPageBySource) {
   return out;
 }
 
+function reorderPageBlock(pages, movingIds, targetIndex) {
+  const movingSet = new Set(movingIds || []);
+  const movingPages = [];
+  const remainingPages = [];
+  for (const page of pages || []) {
+    (movingSet.has(page.id) ? movingPages : remainingPages).push(page);
+  }
+  if (movingPages.length === 0 || remainingPages.length === 0) return [...(pages || [])];
+
+  const index = Number.isFinite(targetIndex) ? Math.trunc(targetIndex) : 0;
+  const insertAt = Math.max(0, Math.min(index, remainingPages.length));
+  remainingPages.splice(insertAt, 0, ...movingPages);
+  return remainingPages;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { LRUCache, escapeHtml, formatBytes, normalizeText, findTextMatches, remapOutlineTree };
+  module.exports = { LRUCache, escapeHtml, formatBytes, normalizeText, findTextMatches, remapOutlineTree, reorderPageBlock };
 }
