@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -427,5 +428,157 @@ func TestConcurrentOperations(t *testing.T) {
 
 	for err := range errCh {
 		t.Errorf("Concurrent operation failed: %v", err)
+	}
+}
+
+// TestMovePageSameFileNoOp (S1): move cùng trang (from == to) về chính file
+// gốc — dù truyền đường dẫn tuyệt đối, tương đối hay "./" — phải là no-op,
+// file giữ nguyên byte-for-byte, không bị truncate còn 0 byte.
+func TestMovePageSameFileNoOp(t *testing.T) {
+	spellings := []struct {
+		name string
+		out  func(dir, base string) string
+	}{
+		{"absolute", func(dir, base string) string { return filepath.Join(dir, base) }},
+		{"relative", func(dir, base string) string { return base }},
+		{"dot-slash", func(dir, base string) string { return "./" + base }},
+	}
+	for _, sp := range spellings {
+		t.Run(sp.name, func(t *testing.T) {
+			dir := t.TempDir()
+			origWD, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Chdir(origWD)
+			if err := os.Chdir(dir); err != nil {
+				t.Fatal(err)
+			}
+			const base = "same.pdf"
+			pdfPath := filepath.Join(dir, base)
+			createValidTestPDF(t, pdfPath, 3)
+			before, err := os.ReadFile(pdfPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := MovePage(pdfPath, sp.out(dir, base), 2, 2); err != nil {
+				t.Fatalf("MovePage same-file no-op trả lỗi: %v", err)
+			}
+			after, err := os.ReadFile(pdfPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != string(before) {
+				t.Fatalf("file bị thay đổi sau move no-op: trước %d byte, sau %d byte", len(before), len(after))
+			}
+		})
+	}
+
+	t.Run("symlink", func(t *testing.T) {
+		dir := t.TempDir()
+		realPath := filepath.Join(dir, "real.pdf")
+		createValidTestPDF(t, realPath, 3)
+		linkPath := filepath.Join(dir, "link.pdf")
+		if err := os.Symlink(realPath, linkPath); err != nil {
+			t.Skipf("không tạo được symlink: %v", err)
+		}
+		before, err := os.ReadFile(realPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := MovePage(linkPath, linkPath, 2, 2); err != nil {
+			t.Fatalf("MovePage qua symlink trả lỗi: %v", err)
+		}
+		after, err := os.ReadFile(realPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(after) != string(before) {
+			t.Fatalf("file gốc qua symlink bị thay đổi: trước %d byte, sau %d byte", len(before), len(after))
+		}
+	})
+
+	t.Run("different-output", func(t *testing.T) {
+		dir := t.TempDir()
+		srcPath := filepath.Join(dir, "src.pdf")
+		outPath := filepath.Join(dir, "out.pdf")
+		createValidTestPDF(t, srcPath, 3)
+		before, err := os.ReadFile(srcPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := MovePage(srcPath, outPath, 2, 2); err != nil {
+			t.Fatalf("MovePage from==to khác file trả lỗi: %v", err)
+		}
+		out, err := os.ReadFile(outPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(out) != string(before) {
+			t.Fatalf("file đích khác nội dung nguồn")
+		}
+		after, err := os.ReadFile(srcPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(after) != string(before) {
+			t.Fatalf("file nguồn bị thay đổi khi move sang file khác")
+		}
+	})
+}
+
+// TestCopyFileSameFileErrors (S1): copyFile cùng file phải trả lỗi rõ ràng và
+// không làm đổi file (defense-in-depth cho mọi call site tương lai).
+func TestCopyFileSameFileErrors(t *testing.T) {
+	dir := t.TempDir()
+	pdfPath := filepath.Join(dir, "a.pdf")
+	createValidTestPDF(t, pdfPath, 2)
+	before, err := os.ReadFile(pdfPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := copyFile(pdfPath, pdfPath); err == nil {
+		t.Fatalf("copyFile(src, src) phải trả lỗi, nhưng trả nil")
+	}
+	if err := copyFile(pdfPath, filepath.Join(dir, ".", "a.pdf")); err == nil {
+		t.Fatalf("copyFile với biến thể './' của cùng file phải trả lỗi")
+	}
+	after, err := os.ReadFile(pdfPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("file bị thay đổi sau copyFile same-file: trước %d byte, sau %d byte", len(before), len(after))
+	}
+}
+
+// TestSameFile (S1): helper sameFile bắt cùng file qua nhiều cách viết path.
+func TestSameFile(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.pdf")
+	createValidTestPDF(t, a, 1)
+	b := filepath.Join(dir, "b.pdf")
+	createValidTestPDF(t, b, 1)
+
+	if !sameFile(a, a) {
+		t.Errorf("sameFile(a, a) = false, muốn true")
+	}
+	if !sameFile(a, filepath.Join(dir, ".", "a.pdf")) {
+		t.Errorf("sameFile với biến thể './' = false, muốn true")
+	}
+	if sameFile(a, b) {
+		t.Errorf("sameFile(a, b khác file) = true, muốn false")
+	}
+	if sameFile(a, filepath.Join(dir, "khong-ton-tai.pdf")) {
+		t.Errorf("sameFile với file không tồn tại = true, muốn false")
+	}
+	if sameFile(filepath.Join(dir, "khong-ton-tai.pdf"), a) {
+		t.Errorf("sameFile(file không tồn tại, a) = true, muốn false")
+	}
+	if runtime.GOOS == "windows" {
+		// Trên Windows, khác hoa/thường vẫn là cùng file (EqualFold).
+		if !sameFile(filepath.Join(dir, "A.pdf"), filepath.Join(dir, "a.pdf")) {
+			t.Errorf("sameFile case-variant trên Windows = false, muốn true")
+		}
 	}
 }

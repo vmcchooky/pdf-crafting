@@ -23,7 +23,7 @@ Hệ quả lên các chặng:
   - [x] **Tốc độ tách trang (split) nhanh hơn ~2,7 lần**: `SplitAll` chuyển từ CollectFile-từng-trang (phân tích lại tệp N lần) sang `SplitFile` của pdfcpu (phân tích 1 lần) — đo bằng benchmark kèm trong repo (`BenchmarkSplitAll60`: 254 ms → 95 ms trên máy kiểm chứng). Phương án worker-pool song song đã thử và **loại bỏ bằng số đo**: chậm hơn trên máy ít nhân, tốn RAM hơn.
   - [x] `convert`: thêm đường **Microsoft Office COM** (Word/Excel/PowerPoint qua PowerShell, danh sách file truyền bằng manifest JSON) khi máy Windows không có LibreOffice; thông báo lỗi khi thiếu cả hai đã rõ ràng.
   - [x] Lệnh `version`/`--version` in phiên bản từ dữ liệu build Go tự nhúng (kèm VCS revision khi build từ checkout).
-  - [x] Rà soát an toàn server Web UI: chỉ bind `127.0.0.1`, giới hạn thân request 150 MB, tên file tải lên được rút gọn vào thư mục tạm riêng — đạt, không phải sửa.
+  - [x] Rà soát an toàn server Web UI: chỉ bind `127.0.0.1`, giới hạn thân request 150 MB, tên file tải lên được rút gọn vào thư mục tạm riêng — **audit 11/2026 tìm thấy nhiều vấn đề (S2/S3/S6/S7/S8/S9/S10/S11/S15: thiếu token phiên, shutdown `os.Exit`, lộ đường dẫn file, thiếu security header/CSP...) và đã sửa trên nhánh `fix/security-audit-2026-11` (xem `docs/SECURITY-FIX-REPORT.md`).
 
 ## Cập nhật 2026-11-27 (tối) — Chặng 2 hoàn tất trên nhánh `stage2-reliability`
 

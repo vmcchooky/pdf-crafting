@@ -6,11 +6,15 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -36,9 +40,26 @@ var webFS embed.FS
 // để tăng tốc xử lý nhưng tuyệt đối không làm treo máy hoặc ngốn tài nguyên lớn.
 var optimizeSemaphore = make(chan struct{}, 3)
 
+// optimizePDFFunc là điểm gọi pdfcpu, tách thành biến để test có thể thay bằng
+// optimizer chậm/lỗi/panic (S8). Mặc định là api.Optimize thật.
+var optimizePDFFunc = api.Optimize
+
 func handleOptimizePDF(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Chỉ chấp nhận phương thức POST", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// S8: lấy semaphore TRƯỚC khi đọc body — request chưa có slot thì không
+	// được giữ 150 MB trong RAM. Timeout 5 s, hủy khi client ngắt kết nối.
+	// Slot chỉ được nhả bởi goroutine tối ưu khi nó kết thúc (xem defer trong
+	// goroutine); handler return sớm (timeout/disconnect) KHÔNG nhả slot.
+	select {
+	case optimizeSemaphore <- struct{}{}:
+	case <-r.Context().Done():
+		return
+	case <-time.After(5 * time.Second):
+		http.Error(w, "Máy chủ đang bận xử lý tác vụ khác, vui lòng thử lại sau", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -46,18 +67,9 @@ func handleOptimizePDF(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 150*1024*1024)
 	pdfBytes, err := io.ReadAll(r.Body)
 	if err != nil || len(pdfBytes) == 0 {
+		// Chưa vào goroutine: handler tự nhả slot ở đây.
+		<-optimizeSemaphore
 		http.Error(w, "Không thể đọc dữ liệu PDF", http.StatusBadRequest)
-		return
-	}
-
-	// Chờ lấy slot trong Goroutine semaphore hoặc hủy nếu client ngắt kết nối
-	select {
-	case optimizeSemaphore <- struct{}{}:
-		defer func() { <-optimizeSemaphore }()
-	case <-r.Context().Done():
-		return
-	case <-time.After(5 * time.Second):
-		http.Error(w, "Máy chủ đang bận xử lý tác vụ khác, vui lòng thử lại sau", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -66,10 +78,25 @@ func handleOptimizePDF(w http.ResponseWriter, r *http.Request) {
 		err  error
 	}
 
+	// resCh buffered 1 để goroutine không block nếu handler đã return.
 	resCh := make(chan optimizeResult, 1)
 
 	// Chạy nén và tối ưu hóa luồng dữ liệu song song qua Goroutine
 	go func() {
+		// S8: goroutine tự nhả semaphore khi kết thúc (kể cả panic/timeout
+		// phía handler). Đăng ký trước recover để recover chạy trước, nhả sau.
+		defer func() { <-optimizeSemaphore }()
+		defer func() {
+			// S8: pdfcpu có thể panic với PDF hỏng — biến panic thành lỗi
+			// trả về thay vì giết process.
+			if rec := recover(); rec != nil {
+				select {
+				case resCh <- optimizeResult{err: fmt.Errorf("optimize panic: %v", rec)}:
+				default:
+				}
+			}
+		}()
+
 		conf := model.NewDefaultConfiguration()
 		conf.ValidationMode = model.ValidationRelaxed
 		conf.Optimize = true
@@ -81,7 +108,7 @@ func handleOptimizePDF(w http.ResponseWriter, r *http.Request) {
 		rs := bytes.NewReader(pdfBytes)
 		var outBuf bytes.Buffer
 
-		if err := api.Optimize(rs, &outBuf, conf); err != nil {
+		if err := optimizePDFFunc(rs, &outBuf, conf); err != nil {
 			resCh <- optimizeResult{err: err}
 			return
 		}
@@ -200,6 +227,10 @@ func handleFinalizeExport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Không đọc được kích thước PDF đã hoàn thiện", http.StatusInternalServerError)
 		return
 	}
+	// S10: client đã ngắt thì không ghi response nữa.
+	if err := r.Context().Err(); err != nil {
+		return
+	}
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", `attachment; filename="crafted_document.pdf"`)
 	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
@@ -229,12 +260,29 @@ func writeConvertError(w http.ResponseWriter, code int, msg string, needLO bool)
 	})
 }
 
+// convertOfficeToPdfFunc là điểm gọi converter, tách thành biến để test chèn
+// converter giả (S9). Mặc định gọi bản Context-aware thật.
+var convertOfficeToPdfFunc = pdfcraft.ConvertOfficeToPdfContext
+
 // handleConvertOffice nhận file Office tải lên (multipart field "files"),
 // chuyển sang PDF bằng LibreOffice rồi trả về: 1 file PDF trực tiếp,
 // nhiều file -> gói ZIP. Lỗi luôn ở dạng JSON {success:false, error}.
 func handleConvertOffice(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Chỉ chấp nhận phương thức POST", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// S9: lấy semaphore TRƯỚC khi parse multipart — request chưa có slot thì
+	// không được giữ 150 MB trong RAM. Slot chỉ nhả sau khi conversion dừng
+	// hẳn VÀ workDir đã xóa (xem thứ tự defer bên dưới).
+	select {
+	case convertSemaphore <- struct{}{}:
+		defer func() { <-convertSemaphore }()
+	case <-r.Context().Done():
+		return
+	case <-time.After(5 * time.Second):
+		http.Error(w, "Máy chủ đang bận, vui lòng thử lại sau", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -256,21 +304,13 @@ func handleConvertOffice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	select {
-	case convertSemaphore <- struct{}{}:
-		defer func() { <-convertSemaphore }()
-	case <-r.Context().Done():
-		return
-	case <-time.After(5 * time.Second):
-		http.Error(w, "Máy chủ đang bận, vui lòng thử lại sau", http.StatusServiceUnavailable)
-		return
-	}
-
 	workDir, err := os.MkdirTemp("", "pdfcraft_web_convert_*")
 	if err != nil {
 		writeConvertError(w, http.StatusInternalServerError, "Không tạo được thư mục tạm", false)
 		return
 	}
+	// S9: đăng ký RemoveAll SAU defer nhả semaphore → khi return, RemoveAll
+	// chạy TRƯỚC khi nhả slot (LIFO): converter đã dừng, workDir đã xóa.
 	defer os.RemoveAll(workDir)
 	inDir := filepath.Join(workDir, "in")
 	outDir := filepath.Join(workDir, "out")
@@ -321,43 +361,60 @@ func handleConvertOffice(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
-	type convResult struct {
-		paths []string
-		err   error
-	}
-	resCh := make(chan convResult, 1)
-	go func() {
-		paths, err := pdfcraft.ConvertOfficeToPdf(inputs, outDir, engine, 110)
-		resCh <- convResult{paths: paths, err: err}
-	}()
 
-	select {
-	case <-ctx.Done():
-		writeConvertError(w, http.StatusGatewayTimeout, "Hết thời gian chờ chuyển đổi (120s)", false)
-		return
-	case res := <-resCh:
-		if res.err != nil {
-			writeConvertError(w, http.StatusInternalServerError, fmt.Sprintf("Lỗi chuyển đổi: %v", res.err), false)
-			return
-		}
-		if len(res.paths) == 1 {
-			// #nosec G304 -- đường dẫn do ConvertOfficeToPdf trả về trong thư mục tạm của request
-			data, err := os.ReadFile(res.paths[0])
-			if err != nil {
-				writeConvertError(w, http.StatusInternalServerError, "Không đọc được kết quả chuyển đổi", false)
-				return
+	// S9: gọi conversion ĐỒNG BỘ trong handler — handler chỉ return khi
+	// converter đã dừng hẳn (xong/lỗi/timeout/client ngắt), nên RemoveAll
+	// workDir và nhả semaphore ở defer không bao giờ chạy trong lúc
+	// LibreOffice còn ghi file. recover() để converter panic không giết process.
+	paths, convErr := func() (paths []string, err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				paths = nil
+				err = fmt.Errorf("conversion panic: %v", rec)
 			}
-			outName := strings.TrimSuffix(filepath.Base(res.paths[0]), filepath.Ext(res.paths[0])) + ".pdf"
-			w.Header().Set("Content-Type", "application/pdf")
-			w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename=%q`, outName))
-			w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write(data)
+		}()
+		return convertOfficeToPdfFunc(ctx, inputs, outDir, engine, 110)
+	}()
+	if convErr != nil {
+		if ctx.Err() != nil {
+			writeConvertError(w, http.StatusGatewayTimeout, "Hết thời gian chờ chuyển đổi (120s)", false)
+		} else {
+			writeConvertError(w, http.StatusInternalServerError, fmt.Sprintf("Lỗi chuyển đổi: %v", convErr), false)
+		}
+		return
+	}
+	if len(paths) == 1 {
+		// #nosec G304 -- đường dẫn do ConvertOfficeToPdf trả về trong thư mục tạm của request
+		f, err := os.Open(paths[0])
+		if err != nil {
+			writeConvertError(w, http.StatusInternalServerError, "Không đọc được kết quả chuyển đổi", false)
 			return
 		}
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil {
+			writeConvertError(w, http.StatusInternalServerError, "Không đọc được kết quả chuyển đổi", false)
+			return
+		}
+		// S10: client đã ngắt thì không ghi response nữa.
+		if err := r.Context().Err(); err != nil {
+			return
+		}
+		outName := strings.TrimSuffix(filepath.Base(paths[0]), filepath.Ext(paths[0])) + ".pdf"
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename=%q`, outName))
+		w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+		w.WriteHeader(http.StatusOK)
+		// S10: stream bằng io.Copy, xử lý lỗi ghi (client ngắt giữa chừng).
+		if _, err := io.Copy(w, f); err != nil {
+			log.Printf("convert: ghi response lỗi (client ngắt?): %v", err)
+		}
+		return
+	}
+	{
 		var zipBuf bytes.Buffer
 		zw := zip.NewWriter(&zipBuf)
-		for _, p := range res.paths {
+		for _, p := range paths {
 			// #nosec G304 -- đường dẫn do ConvertOfficeToPdf trả về trong thư mục tạm của request
 			data, err := os.ReadFile(p)
 			if err != nil {
@@ -381,11 +438,17 @@ func handleConvertOffice(w http.ResponseWriter, r *http.Request) {
 			writeConvertError(w, http.StatusInternalServerError, "Không đóng gói được kết quả", false)
 			return
 		}
+		// S10: client đã ngắt thì không ghi response nữa.
+		if err := r.Context().Err(); err != nil {
+			return
+		}
 		w.Header().Set("Content-Type", "application/zip")
 		w.Header().Set("Content-Disposition", `attachment; filename="pdfcraft_converted.zip"`)
 		w.Header().Set("Content-Length", strconv.Itoa(zipBuf.Len()))
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(zipBuf.Bytes())
+		if _, err := w.Write(zipBuf.Bytes()); err != nil {
+			log.Printf("convert: ghi response ZIP lỗi (client ngắt?): %v", err)
+		}
 	}
 }
 
@@ -393,6 +456,9 @@ var (
 	initialFilePath string
 	initialFileMu   sync.RWMutex
 )
+
+// maxInitialFileBytes là ngưỡng từ chối file ban đầu ở /api/initial-file/content (S11).
+const maxInitialFileBytes = 2 * 1024 * 1024 * 1024 // 2 GiB
 
 func setInitialFile(path string) {
 	initialFileMu.Lock()
@@ -412,6 +478,384 @@ func getInitialFile() string {
 	initialFileMu.RLock()
 	defer initialFileMu.RUnlock()
 	return initialFilePath
+}
+
+// consumeInitialFile lấy path rồi xóa trong một lần khóa — hai request đồng
+// thời không cùng đọc được file (S11).
+func consumeInitialFile() string {
+	initialFileMu.Lock()
+	defer initialFileMu.Unlock()
+	p := initialFilePath
+	initialFilePath = ""
+	return p
+}
+
+// sessionTokenHeader là tên header mang token phiên cho mọi /api/*.
+// #nosec G101 -- tên header, không phải credential.
+const sessionTokenHeader = "X-PDFCraft-Token"
+
+// tokenPlaceholder là chuỗi trong web/index.html được server thay bằng token
+// phiên khi phục vụ trang chính. Placeholder không bao giờ xuất hiện trong
+// file JS tĩnh, URL hay log.
+// #nosec G101 -- placeholder được server thay bằng token phiên, không phải credential.
+const tokenPlaceholder = "__PDFCRAFT_TOKEN__"
+
+// newSessionToken sinh token phiên ngẫu nhiên 32 byte (hex 64 ký tự) bằng
+// crypto/rand. Token chỉ sống trong tiến trình này.
+func newSessionToken() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw), nil
+}
+
+// securityMiddleware bọc toàn bộ mux: chống DNS rebinding (kiểm tra Host) và
+// CSRF (token phiên trên /api/*, kiểm tra Origin với method đổi trạng thái).
+// Không thêm Access-Control-Allow-Origin.
+func securityMiddleware(port int, token string, next http.Handler) http.Handler {
+	loopbackOrigins := map[string]bool{
+		"http://127.0.0.1:" + strconv.Itoa(port): true,
+		"http://localhost:" + strconv.Itoa(port): true,
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 1. Host phải là loopback có port — chặn DNS rebinding: domain của
+		// attacker resolve về 127.0.0.1 nhưng mang Host giả.
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil || (host != "127.0.0.1" && host != "localhost") {
+			http.Error(w, "Forbidden: invalid Host", http.StatusMisdirectedRequest)
+			return
+		}
+		// 2. Mọi /api/* bắt buộc header X-PDFCraft-Token khớp token phiên
+		// (so sánh hằng thời gian). Token rỗng phía server → từ chối hết.
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			got := r.Header.Get(sessionTokenHeader)
+			if token == "" || subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
+				http.Error(w, "Unauthorized: missing or invalid session token", http.StatusUnauthorized)
+				return
+			}
+		}
+		// 3. Method đổi trạng thái: nếu có Origin thì phải là loopback cùng
+		// port; nếu không có Origin thì chỉ cho phép Sec-Fetch-Site
+		// same-origin/none hoặc không có header (CLI/test).
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			if origin := r.Header.Get("Origin"); origin != "" {
+				if !loopbackOrigins[origin] {
+					http.Error(w, "Forbidden: invalid Origin", http.StatusForbidden)
+					return
+				}
+			} else if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {
+				http.Error(w, "Forbidden: cross-site request", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// securityCSP là Content-Security-Policy đầy đủ (S15, thay CSP tối thiểu của
+// S7). script-src 'self' — KHÔNG 'unsafe-inline'/'unsafe-eval' (inline
+// <script> đã tách ra pdfjs-loader.mjs); style-src giữ 'unsafe-inline' vì
+// app dùng <style> nội tuyến và style attribute; worker/blob cần cho pdf.js;
+// img/font data: cho stamp/thumbnail/font nhúng.
+const securityCSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+
+// securityHeadersMiddleware gắn security header lên MỌI response (kể cả
+// response lỗi từ securityMiddleware và asset tĩnh): đặt ngoài cùng để header
+// có mặt ngay cả khi request bị chặn ở lớp trong.
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		w.Header().Set("Content-Security-Policy", securityCSP)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// newMux dựng toàn bộ mux của Web UI server (API + file tĩnh). Tách riêng
+// khỏi runUI để test được middleware và token injection mà không cần dựng
+// cả browser/server thật.
+func newMux(port int, token string, webRoot fs.FS) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/optimize", handleOptimizePDF)
+	mux.HandleFunc("/api/export/finalize", handleFinalizeExport)
+	mux.HandleFunc("/api/convert", handleConvertOffice)
+	mux.HandleFunc("/api/shutdown", func(w http.ResponseWriter, r *http.Request) {
+		// Token + Origin đã được middleware (S3) kiểm tra trước khi tới đây.
+		if r.Method != http.MethodPost {
+			http.Error(w, "Chỉ chấp nhận POST", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"status":"accepted"}`))
+		// Không os.Exit: gửi tín hiệu để runUI tắt graceful (S17).
+		requestShutdown()
+	})
+
+	// Trả về thông tin tệp PDF được truyền vào khi khởi chạy (qua CLI hoặc Context Menu)
+	mux.HandleFunc("/api/initial-file", func(w http.ResponseWriter, r *http.Request) {
+		// S11: chỉ cho GET; token đã được middleware (S3) kiểm tra.
+		if r.Method != http.MethodGet {
+			http.Error(w, "Chỉ chấp nhận GET", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		filePath := getInitialFile()
+		if filePath == "" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"has_file": false})
+			return
+		}
+		fi, err := os.Stat(filePath)
+		if err != nil {
+			// S11: không lộ chi tiết lỗi (có thể chứa đường dẫn tuyệt đối).
+			_ = json.NewEncoder(w).Encode(map[string]any{"has_file": false})
+			return
+		}
+		// S11: chỉ trả filename + size, KHÔNG trả path tuyệt đối.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"has_file": true,
+			"filename": filepath.Base(filePath),
+			"size":     fi.Size(),
+		})
+	})
+
+	// Tải dữ liệu nhị phân của tệp PDF được chỉ định khi khởi chạy
+	mux.HandleFunc("/api/initial-file/content", func(w http.ResponseWriter, r *http.Request) {
+		// S11: chỉ cho GET; token đã được middleware (S3) kiểm tra.
+		if r.Method != http.MethodGet {
+			http.Error(w, "Chỉ chấp nhận GET", http.StatusMethodNotAllowed)
+			return
+		}
+		// S11: consume atomic — request thứ hai sau khi consume → 404.
+		filePath := consumeInitialFile()
+		if filePath == "" {
+			http.Error(w, "Không có tệp ban đầu", http.StatusNotFound)
+			return
+		}
+		// #nosec G304 -- filePath từ tham số khởi chạy cục bộ (initial-file), không lấy từ HTTP request
+		f, err := os.Open(filePath)
+		if err != nil {
+			http.Error(w, "Không thể đọc tệp", http.StatusInternalServerError)
+			return
+		}
+		defer f.Close()
+		fi, err := f.Stat()
+		if err != nil {
+			http.Error(w, "Không thể đọc tệp", http.StatusInternalServerError)
+			return
+		}
+		// S11: file quá lớn (> 2 GiB) thì từ chối thay vì stream.
+		if fi.Size() > maxInitialFileBytes {
+			http.Error(w, "Tệp ban đầu quá lớn (> 2 GB)", http.StatusRequestEntityTooLarge)
+			return
+		}
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename=%q`, filepath.Base(filePath)))
+		w.Header().Set("Cache-Control", "no-store")
+		// S11: stream + hỗ trợ Range qua ServeContent, không ReadFile cả
+		// file vào RAM.
+		http.ServeContent(w, r, filepath.Base(filePath), fi.ModTime(), f)
+	})
+
+	// Kiểm tra trạng thái đăng ký Menu chuột phải Windows
+	mux.HandleFunc("/api/context-menu/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		installed := isContextMenuInstalled()
+		_ = json.NewEncoder(w).Encode(map[string]any{"installed": installed})
+	})
+
+	// Đăng ký Menu chuột phải Windows qua 1-click từ Web UI
+	mux.HandleFunc("/api/context-menu/install", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Chỉ chấp nhận POST", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		err := installContextMenu()
+		if err != nil {
+			// S6: log chi tiết ở server, chỉ trả thông báo chung — không lộ
+			// đường dẫn registry/exe ra ngoài.
+			log.Printf("context-menu install thất bại: %v", err)
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "Không thể cập nhật Menu chuột phải Windows"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+	})
+
+	// Gỡ bỏ Menu chuột phải Windows qua 1-click từ Web UI
+	mux.HandleFunc("/api/context-menu/uninstall", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Chỉ chấp nhận POST", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		err := uninstallContextMenu()
+		if err != nil {
+			// S6: log chi tiết ở server, chỉ trả thông báo chung.
+			log.Printf("context-menu uninstall thất bại: %v", err)
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "Không thể cập nhật Menu chuột phải Windows"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+	})
+
+	type cachedAsset struct {
+		gzipped []byte
+		etag    string
+		mime    string
+	}
+	var staticCache sync.Map
+
+	getMimeType := func(p string) string {
+		switch {
+		case strings.HasSuffix(p, ".js"):
+			return "application/javascript; charset=utf-8"
+		case strings.HasSuffix(p, ".css"):
+			return "text/css; charset=utf-8"
+		case strings.HasSuffix(p, ".html") || p == "/" || p == "":
+			return "text/html; charset=utf-8"
+		case strings.HasSuffix(p, ".svg"):
+			return "image/svg+xml"
+		case strings.HasSuffix(p, ".json"):
+			return "application/json; charset=utf-8"
+		case strings.HasSuffix(p, ".ico"):
+			return "image/x-icon"
+		default:
+			return "application/octet-stream"
+		}
+	}
+
+	fileServer := http.FileServer(http.FS(webRoot))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		cleanPath := strings.TrimPrefix(r.URL.Path, "/")
+		if cleanPath == "" {
+			cleanPath = "index.html"
+		}
+
+		// Trang chính: inject token phiên vào meta tag, không cache.
+		// Không đi qua gzip cache để token không bị lưu lại.
+		if cleanPath == "index.html" {
+			if raw, err := fs.ReadFile(webRoot, "index.html"); err == nil {
+				page := bytes.ReplaceAll(raw, []byte(tokenPlaceholder), []byte(token))
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.Header().Set("Cache-Control", "no-store")
+				w.Header().Set("Content-Length", strconv.Itoa(len(page)))
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(page)
+				return
+			}
+		}
+
+		// Tối ưu hóa Cache-Control:
+		// - Thư viện tĩnh trong vendor/ (pdf.js, pdf-lib,...) không đổi: cache dài hạn immutable
+		// - Các tệp ứng dụng (app.js, app.css, index.html): cho phép cache nhưng phải revalidate với ETag (304)
+		if strings.HasPrefix(r.URL.Path, "/vendor/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		}
+
+		acceptEncoding := r.Header.Get("Accept-Encoding")
+		isCompressible := r.Method != http.MethodHead && (strings.HasSuffix(cleanPath, ".js") ||
+			strings.HasSuffix(cleanPath, ".css") ||
+			strings.HasSuffix(cleanPath, ".html") ||
+			strings.HasSuffix(cleanPath, ".svg") ||
+			strings.HasSuffix(cleanPath, ".json"))
+
+		if isCompressible && strings.Contains(acceptEncoding, "gzip") {
+			// Kiểm tra bộ đệm nén In-Memory Gzip (Zero-Allocation & TTFB < 0.5ms)
+			if val, ok := staticCache.Load(cleanPath); ok {
+				cached := val.(*cachedAsset)
+				w.Header().Set("Content-Type", cached.mime)
+				w.Header().Set("Content-Encoding", "gzip")
+				w.Header().Set("Vary", "Accept-Encoding")
+				w.Header().Set("ETag", cached.etag)
+
+				if match := r.Header.Get("If-None-Match"); match != "" && match == cached.etag {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+
+				w.Header().Set("Content-Length", strconv.Itoa(len(cached.gzipped)))
+				w.WriteHeader(http.StatusOK)
+				// #nosec G705 -- chỉ ghi bytes từ embed FS nội bộ với Content-Type whitelist, không phản chiếu input người dùng
+				_, _ = w.Write(cached.gzipped)
+				return
+			}
+
+			// Nạp và nén 1 lần duy nhất từ embed FS, lưu vào cache bộ nhớ cho mọi request tiếp theo
+			rawBytes, err := fs.ReadFile(webRoot, cleanPath)
+			if err == nil {
+				var gzBuf bytes.Buffer
+				gz, _ := gzip.NewWriterLevel(&gzBuf, gzip.BestSpeed)
+				_, _ = gz.Write(rawBytes)
+				_ = gz.Close()
+
+				gzippedData := gzBuf.Bytes()
+				etag := fmt.Sprintf(`"%x-%x"`, len(rawBytes), len(gzippedData))
+				mime := getMimeType(cleanPath)
+
+				cached := &cachedAsset{
+					gzipped: gzippedData,
+					etag:    etag,
+					mime:    mime,
+				}
+				staticCache.Store(cleanPath, cached)
+
+				w.Header().Set("Content-Type", mime)
+				w.Header().Set("Content-Encoding", "gzip")
+				w.Header().Set("Vary", "Accept-Encoding")
+				w.Header().Set("ETag", etag)
+
+				if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+
+				w.Header().Set("Content-Length", strconv.Itoa(len(gzippedData)))
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(gzippedData)
+				return
+			}
+		}
+
+		fileServer.ServeHTTP(w, r)
+	})
+
+	return mux
+}
+
+// shutdownCh nhận tín hiệu tắt từ API shutdown (S2), signal Ctrl+C/SIGTERM
+// hoặc phím Enter/Q. Buffered 1 + gửi non-blocking để handler gọi
+// requestShutdown không bao giờ kẹt.
+var shutdownCh = make(chan struct{}, 1)
+
+// requestShutdown gửi tín hiệu tắt một lần; các lần gửi thêm được bỏ qua.
+func requestShutdown() {
+	select {
+	case shutdownCh <- struct{}{}:
+	default:
+	}
+}
+
+// newUIServer dựng http.Server cho Web UI (tách riêng để test được timeout S10).
+func newUIServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		// S10: upload/download lớn (export 512 MB, convert 120s) vượt 60s cũ —
+		// nâng Read/WriteTimeout lên 5 phút (app local). Giữ ReadHeaderTimeout
+		// 10s và IdleTimeout 120s.
+		ReadTimeout:  5 * time.Minute,
+		WriteTimeout: 5 * time.Minute,
+		IdleTimeout:  120 * time.Second,
+	}
 }
 
 func runUI(args []string, initialFile string) {
@@ -459,216 +903,13 @@ func runUI(args []string, initialFile string) {
 
 	url := fmt.Sprintf("http://127.0.0.1:%d", actualPort)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/optimize", handleOptimizePDF)
-	mux.HandleFunc("/api/export/finalize", handleFinalizeExport)
-	mux.HandleFunc("/api/convert", handleConvertOffice)
-	mux.HandleFunc("/api/shutdown", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-		go func() {
-			time.Sleep(350 * time.Millisecond)
-			fmt.Println("\n[INFO] Đang đóng ứng dụng theo yêu cầu từ giao diện...")
-			os.Exit(0)
-		}()
-	})
-
-	// Trả về thông tin tệp PDF được truyền vào khi khởi chạy (qua CLI hoặc Context Menu)
-	mux.HandleFunc("/api/initial-file", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		filePath := getInitialFile()
-		if filePath == "" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"has_file": false})
-			return
-		}
-		fi, err := os.Stat(filePath)
-		if err != nil {
-			_ = json.NewEncoder(w).Encode(map[string]any{"has_file": false, "error": err.Error()})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"has_file": true,
-			"filename": filepath.Base(filePath),
-			"path":     filePath,
-			"size":     fi.Size(),
-		})
-	})
-
-	// Tải dữ liệu nhị phân của tệp PDF được chỉ định khi khởi chạy
-	mux.HandleFunc("/api/initial-file/content", func(w http.ResponseWriter, r *http.Request) {
-		filePath := getInitialFile()
-		if filePath == "" {
-			http.Error(w, "Không có tệp ban đầu", http.StatusNotFound)
-			return
-		}
-		// #nosec G304 -- filePath từ tham số khởi chạy cục bộ (initial-file), không lấy từ HTTP request
-		data, err := os.ReadFile(filePath)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Không thể đọc tệp: %v", err), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/pdf")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename=%q`, filepath.Base(filePath)))
-		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-		_, _ = w.Write(data)
-
-		// Tự động giải phóng tệp ban đầu sau khi đã nạp lần đầu, tránh bị nạp đè lại khi F5
-		setInitialFile("")
-	})
-
-	// Kiểm tra trạng thái đăng ký Menu chuột phải Windows
-	mux.HandleFunc("/api/context-menu/status", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		installed := isContextMenuInstalled()
-		_ = json.NewEncoder(w).Encode(map[string]any{"installed": installed})
-	})
-
-	// Đăng ký Menu chuột phải Windows qua 1-click từ Web UI
-	mux.HandleFunc("/api/context-menu/install", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Chỉ chấp nhận POST", http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		err := installContextMenu()
-		if err != nil {
-			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
-	})
-
-	// Gỡ bỏ Menu chuột phải Windows qua 1-click từ Web UI
-	mux.HandleFunc("/api/context-menu/uninstall", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Chỉ chấp nhận POST", http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		err := uninstallContextMenu()
-		if err != nil {
-			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error()})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
-	})
-
-	type cachedAsset struct {
-		gzipped []byte
-		etag    string
-		mime    string
-	}
-	var staticCache sync.Map
-
-	getMimeType := func(p string) string {
-		switch {
-		case strings.HasSuffix(p, ".js"):
-			return "application/javascript; charset=utf-8"
-		case strings.HasSuffix(p, ".css"):
-			return "text/css; charset=utf-8"
-		case strings.HasSuffix(p, ".html") || p == "/" || p == "":
-			return "text/html; charset=utf-8"
-		case strings.HasSuffix(p, ".svg"):
-			return "image/svg+xml"
-		case strings.HasSuffix(p, ".json"):
-			return "application/json; charset=utf-8"
-		case strings.HasSuffix(p, ".ico"):
-			return "image/x-icon"
-		default:
-			return "application/octet-stream"
-		}
+	sessionToken, err := newSessionToken()
+	if err != nil {
+		fmt.Printf("[LỖI] Không thể sinh token phiên: %v\n", err)
+		return
 	}
 
-	fileServer := http.FileServer(http.FS(sub))
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		cleanPath := strings.TrimPrefix(r.URL.Path, "/")
-		if cleanPath == "" {
-			cleanPath = "index.html"
-		}
-
-		// Tối ưu hóa Cache-Control:
-		// - Thư viện tĩnh trong vendor/ (pdf.js, pdf-lib,...) không đổi: cache dài hạn immutable
-		// - Các tệp ứng dụng (app.js, app.css, index.html): cho phép cache nhưng phải revalidate với ETag (304)
-		if strings.HasPrefix(r.URL.Path, "/vendor/") {
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		} else {
-			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
-		}
-
-		acceptEncoding := r.Header.Get("Accept-Encoding")
-		isCompressible := r.Method != http.MethodHead && (strings.HasSuffix(cleanPath, ".js") ||
-			strings.HasSuffix(cleanPath, ".css") ||
-			strings.HasSuffix(cleanPath, ".html") ||
-			strings.HasSuffix(cleanPath, ".svg") ||
-			strings.HasSuffix(cleanPath, ".json"))
-
-		if isCompressible && strings.Contains(acceptEncoding, "gzip") {
-			// Kiểm tra bộ đệm nén In-Memory Gzip (Zero-Allocation & TTFB < 0.5ms)
-			if val, ok := staticCache.Load(cleanPath); ok {
-				cached := val.(*cachedAsset)
-				w.Header().Set("Content-Type", cached.mime)
-				w.Header().Set("Content-Encoding", "gzip")
-				w.Header().Set("Vary", "Accept-Encoding")
-				w.Header().Set("ETag", cached.etag)
-
-				if match := r.Header.Get("If-None-Match"); match != "" && match == cached.etag {
-					w.WriteHeader(http.StatusNotModified)
-					return
-				}
-
-				w.Header().Set("Content-Length", strconv.Itoa(len(cached.gzipped)))
-				w.WriteHeader(http.StatusOK)
-				// #nosec G705 -- chỉ ghi bytes từ embed FS nội bộ với Content-Type whitelist, không phản chiếu input người dùng
-				_, _ = w.Write(cached.gzipped)
-				return
-			}
-
-			// Nạp và nén 1 lần duy nhất từ embed FS, lưu vào cache bộ nhớ cho mọi request tiếp theo
-			rawBytes, err := fs.ReadFile(sub, cleanPath)
-			if err == nil {
-				var gzBuf bytes.Buffer
-				gz, _ := gzip.NewWriterLevel(&gzBuf, gzip.BestSpeed)
-				_, _ = gz.Write(rawBytes)
-				_ = gz.Close()
-
-				gzippedData := gzBuf.Bytes()
-				etag := fmt.Sprintf(`"%x-%x"`, len(rawBytes), len(gzippedData))
-				mime := getMimeType(cleanPath)
-
-				cached := &cachedAsset{
-					gzipped: gzippedData,
-					etag:    etag,
-					mime:    mime,
-				}
-				staticCache.Store(cleanPath, cached)
-
-				w.Header().Set("Content-Type", mime)
-				w.Header().Set("Content-Encoding", "gzip")
-				w.Header().Set("Vary", "Accept-Encoding")
-				w.Header().Set("ETag", etag)
-
-				if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
-					w.WriteHeader(http.StatusNotModified)
-					return
-				}
-
-				w.Header().Set("Content-Length", strconv.Itoa(len(gzippedData)))
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write(gzippedData)
-				return
-			}
-		}
-
-		fileServer.ServeHTTP(w, r)
-	})
-
-	server := &http.Server{
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       60 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       120 * time.Second,
-	}
+	server := newUIServer(securityHeadersMiddleware(securityMiddleware(actualPort, sessionToken, newMux(actualPort, sessionToken, sub))))
 
 	fmt.Println("========================================================================")
 	fmt.Println("  PDF Craft - Bộ công cụ Quản lý & Tối ưu hóa PDF Chuyên nghiệp")
@@ -685,14 +926,14 @@ func runUI(args []string, initialFile string) {
 	fmt.Println("  • (Xem hướng dẫn CLI: Mở CMD và gõ 'pdfcraft.exe help')")
 	fmt.Println("========================================================================")
 
-	// Lắng nghe tín hiệu dừng (Ctrl+C, SIGINT, SIGTERM)
+	// Lắng nghe tín hiệu dừng (Ctrl+C, SIGINT, SIGTERM) — cùng đường tắt
+	// graceful với API shutdown và phím Enter/Q (S17).
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		fmt.Println("\nĐã nhận lệnh thoát. Cảm ơn bạn đã dùng PDF Craft!")
-		_ = server.Close()
-		os.Exit(0)
+		fmt.Println("\nĐã nhận lệnh thoát. Đang tắt graceful...")
+		requestShutdown()
 	}()
 
 	// Lắng nghe phím Enter hoặc Q từ console để thoát tiện lợi
@@ -701,9 +942,9 @@ func runUI(args []string, initialFile string) {
 		for scanner.Scan() {
 			text := strings.TrimSpace(scanner.Text())
 			if strings.EqualFold(text, "q") || strings.EqualFold(text, "exit") || strings.EqualFold(text, "quit") || text == "" {
-				fmt.Println("\nĐã nhận lệnh thoát từ bàn phím. Cảm ơn bạn đã dùng PDF Craft!")
-				_ = server.Close()
-				os.Exit(0)
+				fmt.Println("\nĐã nhận lệnh thoát từ bàn phím. Đang tắt graceful...")
+				requestShutdown()
+				return
 			}
 		}
 		if err := scanner.Err(); err != nil {
@@ -717,9 +958,30 @@ func runUI(args []string, initialFile string) {
 		openBrowser(url)
 	}()
 
-	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
-		fmt.Printf("[LỖI] Máy chủ dừng: %v\n", err)
+	// Chạy server trong goroutine; main select giữa lỗi serve và tín hiệu tắt.
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.Serve(listener)
+	}()
+
+	select {
+	case <-shutdownCh:
+		fmt.Println("\n[INFO] Đang tắt máy chủ (graceful shutdown)...")
+	case err := <-serveErr:
+		if err != nil && err != http.ErrServerClosed {
+			fmt.Printf("[LỖI] Máy chủ dừng: %v\n", err)
+		}
+		return
 	}
+
+	// Graceful shutdown: cho request đang chạy tối đa 15s để hoàn tất.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		fmt.Printf("[CẢNH BÁO] Graceful shutdown lỗi, ép đóng: %v\n", err)
+		_ = server.Close()
+	}
+	fmt.Println("Đã tắt. Cảm ơn bạn đã dùng PDF Craft!")
 }
 
 func openBrowser(url string) {

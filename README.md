@@ -70,6 +70,8 @@ Bạn có thể chạy trực tiếp `pdfcraft.exe` trên terminal/PowerShell m�
 .\pdfcraft.exe text examples/sample_doc.pdf --page 1
 ```
 
+> ⚠️ **Mật khẩu trong argv** (`--password`, `--user-pw`, `--owner-pw`) hiện trong Task Manager/process list và PowerShell history. Nên dùng `--password-stdin` / `--user-pw-stdin` / `--owner-pw-stdin` (đọc một dòng từ stdin, ví dụ `echo secret123 | .\pdfcraft.exe info encrypted.pdf --password-stdin`), hoặc chạy không flag trong terminal để nhập tương tác (chỉ với `encrypt`/`decrypt`).
+
 ### Tách / trích xuất (`split`, `extract`)
 ```bash
 .\pdfcraft.exe split examples/sample_doc.pdf -d ./pages_output
@@ -95,6 +97,8 @@ Bạn có thể chạy trực tiếp `pdfcraft.exe` trên terminal/PowerShell m�
 ```bash
 .\pdfcraft.exe encrypt doc.pdf --user-pw secret123 -o doc_enc.pdf
 .\pdfcraft.exe decrypt doc_enc.pdf --password secret123 -o doc.pdf
+# Khuyên dùng (tránh lộ mật khẩu trong argv):
+echo secret123 | .\pdfcraft.exe decrypt doc_enc.pdf --password-stdin -o doc.pdf
 .\pdfcraft.exe meta doc.pdf --title "Bao cao Q3" --author "PDF Craft" -o doc_meta.pdf
 .\pdfcraft.exe bookmark doc.pdf
 .\pdfcraft.exe bookmark doc.pdf --add "Ket luan" --page 5 -o doc_bm.pdf
@@ -108,6 +112,8 @@ Bạn có thể chạy trực tiếp `pdfcraft.exe` trên terminal/PowerShell m�
 .\pdfcraft.exe convert a.docx b.xlsx -d ./pdf_out/
 .\pdfcraft.exe convert *.docx --engine "C:\Program Files\LibreOffice\program\soffice.exe"
 ```
+
+> ⚠️ **Chỉ chuyển đổi tài liệu tin cậy.** Converter chạy với profile LibreOffice tạm (macro tắt ở mức cao nhất, không cập nhật link ngoài) và MS Office với `AutomationSecurity=3`, nhưng đây KHÔNG phải sandbox đầy đủ: tài liệu Office độc vẫn có thể khai thác parser. Với tài liệu không tin cậy, hãy chuyển đổi trong VM/container riêng. Chạy converter với token quyền thấp trên Windows là technical debt (chưa làm).
 
 ### Web UI & tích hợp Windows
 ```bash

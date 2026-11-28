@@ -3,6 +3,7 @@ package pdfcraft
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +25,71 @@ var knownSofficePaths = []string{
 	"/usr/bin/libreoffice",
 	"/opt/libreoffice/program/soffice",
 	"/Applications/LibreOffice.app/Contents/MacOS/soffice",
+}
+
+// libreOfficeHardeningXCU là registrymodifications.xcu gieo vào profile tạm
+// của mỗi batch convert (S13). Key đã xác minh theo docling/hardentools và
+// LibreOffice 24.2:
+//   - MacroSecurityLevel=3 (Very High) + DisableMacrosExecution=true:
+//     macro trong tài liệu không chạy khi convert.
+//   - Writer/Content/Update Link=0 và Calc/Content/Update Link=0: không cập
+//     nhật link ngoài/DDE khi mở file (chống SSRF/file-inclusion qua link).
+//
+// DDE/OLE-object/remote-image không có key chung đáng tin cậy cho mọi phiên
+// bản LibreOffice nên không đặt ở đây — ghi residual risk trong report.
+const libreOfficeHardeningXCU = `<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <item oor:path="/org.openoffice.Office.Common/Security/Scripting">
+  <prop oor:name="MacroSecurityLevel" oor:op="fuse">
+   <value>3</value>
+  </prop>
+ </item>
+ <item oor:path="/org.openoffice.Office.Common/Security/Scripting">
+  <prop oor:name="DisableMacrosExecution" oor:op="fuse">
+   <value>true</value>
+  </prop>
+ </item>
+ <item oor:path="/org.openoffice.Office.Writer/Content/Update">
+  <prop oor:name="Link" oor:op="fuse">
+   <value>0</value>
+  </prop>
+ </item>
+ <item oor:path="/org.openoffice.Office.Calc/Content/Update">
+  <prop oor:name="Link" oor:op="fuse">
+   <value>0</value>
+  </prop>
+ </item>
+</oor:items>
+`
+
+// writeLibreOfficeProfile tạo profile tạm (dir/user/registrymodifications.xcu)
+// với cấu hình hardening. LibreOffice tự tạo phần còn lại khi chạy lần đầu.
+func writeLibreOfficeProfile(profileDir string) error {
+	userDir := filepath.Join(profileDir, "user")
+	if err := os.MkdirAll(userDir, 0750); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(userDir, "registrymodifications.xcu"), []byte(libreOfficeHardeningXCU), 0600)
+}
+
+// libreOfficeProfileArg trả về -env:UserInstallation=file:///<profile>
+// (URL-encode đúng trên Windows nhờ net/url).
+func libreOfficeProfileArg(profileDir string) string {
+	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(profileDir)}
+	return "-env:UserInstallation=" + u.String()
+}
+
+// libreOfficeArgs dựng argv cho soffice: profile tạm + flag hardening
+// (checklist S13) + convert. Hàm thuần để unit test assert được mà không cần
+// binary LibreOffice.
+func libreOfficeArgs(profileDir, outDir string, batch []string) []string {
+	args := []string{
+		libreOfficeProfileArg(profileDir),
+		"--headless", "--norestore", "--nolockcheck", "--nodefault",
+		"--nofirststartwizard", "--nologo",
+		"--convert-to", "pdf", "--outdir", outDir,
+	}
+	return append(args, batch...)
 }
 
 // FindOfficeEngine tìm binary `soffice`/`libreoffice`, trả về "" nếu không có.
@@ -55,11 +121,12 @@ func uniqueOfficeOutput(outDir, stem string, reserved map[string]bool) string {
 	return candidate
 }
 
-// ConvertOfficeToPdf chuyển hàng loạt file Office sang PDF, giữ đúng thứ tự đầu vào.
+// ConvertOfficeToPdfContext chuyển hàng loạt file Office sang PDF, giữ đúng thứ tự đầu vào.
+// ctx của caller (vd: request HTTP) được tôn trọng: hủy/timeout sẽ dừng converter.
 // outDir trống = cùng thư mục file gốc. enginePath trống = tự tìm LibreOffice;
 // không có LibreOffice thì trên Windows tự dùng Microsoft Office (COM) nếu có.
 // Trả về danh sách file PDF đã tạo theo đúng thứ tự input.
-func ConvertOfficeToPdf(inputPaths []string, outDir, enginePath string, timeoutSec int) ([]string, error) {
+func ConvertOfficeToPdfContext(ctx context.Context, inputPaths []string, outDir, enginePath string, timeoutSec int) ([]string, error) {
 	if len(inputPaths) == 0 {
 		return nil, fmt.Errorf("cần ít nhất 1 file Office đầu vào để chuyển đổi")
 	}
@@ -160,7 +227,9 @@ func ConvertOfficeToPdf(inputPaths []string, outDir, enginePath string, timeoutS
 			}
 			runErr := func() error {
 				defer os.RemoveAll(tmpDir)
-				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
+				// Timeout của lượt convert tính từ ctx của caller: client ngắt
+				// hoặc hết timeoutSec đều dừng converter (S9).
+				ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 				defer cancel()
 
 				if useMSOffice {
@@ -171,8 +240,16 @@ func ConvertOfficeToPdf(inputPaths []string, outDir, enginePath string, timeoutS
 						return err
 					}
 				} else {
-					args := []string{"--headless", "--convert-to", "pdf", "--outdir", tmpDir}
-					args = append(args, batch...)
+					// S13: profile LibreOffice tạm cho mỗi batch — không dùng
+					// profile người dùng, macro tắt mức cao nhất, không cập nhật
+					// link ngoài. Profile nằm trong tmpDir của batch nên được
+					// dọn cùng (defer RemoveAll). Lỗi tạo profile → fail closed,
+					// không convert bằng profile mặc định.
+					profileDir := filepath.Join(tmpDir, "profile")
+					if err := writeLibreOfficeProfile(profileDir); err != nil {
+						return fmt.Errorf("không tạo được profile LibreOffice tạm: %w", err)
+					}
+					args := libreOfficeArgs(profileDir, tmpDir, batch)
 					// #nosec G204 -- engine là LibreOffice đã kiểm chứng tồn tại, batch là file do người dùng chỉ định cho CLI cục bộ
 					cmd := exec.CommandContext(ctx, engine, args...)
 					out, err := cmd.CombinedOutput()
@@ -211,4 +288,9 @@ func ConvertOfficeToPdf(inputPaths []string, outDir, enginePath string, timeoutS
 		result = append(result, produced[src])
 	}
 	return result, nil
+}
+
+// ConvertOfficeToPdf là wrapper cũ cho CLI (không có ctx của request).
+func ConvertOfficeToPdf(inputPaths []string, outDir, enginePath string, timeoutSec int) ([]string, error) {
+	return ConvertOfficeToPdfContext(context.Background(), inputPaths, outDir, enginePath, timeoutSec)
 }

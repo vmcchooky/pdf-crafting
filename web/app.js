@@ -5,7 +5,21 @@
 
 // Configure PDF.js worker (sử dụng worker nội bộ offline)
 if (window.pdfjsLib) {
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.mjs';
+}
+
+// S5 (CVE-2024-4367): tắt eval trong PDF.js ở MỌI getDocument —
+// PDF độc không được chạy JS trong origin của app.
+const PDFJS_OPTIONS = { isEvalSupported: false };
+
+// Token phiên do server inject qua <meta name="pdfcraft-token"> (S3).
+// Mọi gọi API dùng apiFetch để gắn header X-PDFCraft-Token; token không nằm
+// trong file JS tĩnh, URL hay log.
+const API_TOKEN = document.querySelector('meta[name="pdfcraft-token"]')?.content || '';
+function apiFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (API_TOKEN) headers.set('X-PDFCraft-Token', API_TOKEN);
+  return fetch(url, { ...options, headers });
 }
 
 // Nạp lười (Lazy Load) thư viện nặng pdf-lib khi cần xuất file hoặc ký tên
@@ -570,11 +584,11 @@ async function convertOfficeFiles(files) {
     return;
   }
   btnConvertOffice.disabled = true;
-  showToast(`Đang chuyển đổi ${valid.length} file Office sang PDF... (cần LibreOffice)`, 'success');
+  showToast(`Đang chuyển đổi ${valid.length} file Office sang PDF... (cần LibreOffice; chỉ chuyển tài liệu tin cậy)`, 'success');
   try {
     const form = new FormData();
     valid.forEach(f => form.append('files', f, f.name));
-    const res = await fetch('/api/convert', { method: 'POST', body: form });
+    const res = await apiFetch('/api/convert', { method: 'POST', body: form });
     if (!res.ok) {
       let msg = `Chuyển đổi thất bại (HTTP ${res.status})`;
       try {
@@ -757,7 +771,7 @@ function setupAccessibleModals() {
 // Check and load initial file from native backend (e.g. opened via Windows Context Menu or CLI)
 async function checkInitialFile() {
   try {
-    const res = await fetch('/api/initial-file');
+    const res = await apiFetch('/api/initial-file');
     if (!res.ok) return;
     const data = await res.json();
     if (data && data.has_file && data.filename) {
@@ -769,7 +783,7 @@ async function checkInitialFile() {
       sessionStorage.setItem(sessionKey, '1');
 
       showToast(`Đang nạp tệp "${data.filename}" từ Windows...`, 'success');
-      const contentRes = await fetch('/api/initial-file/content');
+      const contentRes = await apiFetch('/api/initial-file/content');
       if (!contentRes.ok) return;
       const blob = await contentRes.blob();
       const file = new File([blob], data.filename, { type: 'application/pdf', lastModified: Date.now() });
@@ -959,7 +973,7 @@ function setupMarqueeSelection() {
 async function checkContextMenuStatus() {
   if (!btnToggleContextMenu || !txtContextMenu) return;
   try {
-    const res = await fetch('/api/context-menu/status');
+    const res = await apiFetch('/api/context-menu/status');
     if (!res.ok) return;
     const data = await res.json();
     updateContextMenuButton(data.installed);
@@ -987,8 +1001,12 @@ function setupContextMenuEvents() {
     try {
       const isInstalled = btnToggleContextMenu.classList.contains('installed');
       const endpoint = isInstalled ? '/api/context-menu/uninstall' : '/api/context-menu/install';
+      // S6: xác nhận trước khi chạm registry Windows.
+      if (!confirm(isInstalled
+        ? 'Gỡ bỏ "Open with PDF Craft" khỏi Menu chuột phải Windows?'
+        : 'Thêm "Open with PDF Craft" vào Menu chuột phải Windows?')) return;
       btnToggleContextMenu.disabled = true;
-      const res = await fetch(endpoint, { method: 'POST' });
+      const res = await apiFetch(endpoint, { method: 'POST' });
       const data = await res.json();
       btnToggleContextMenu.disabled = false;
       if (data.success) {
@@ -1412,6 +1430,11 @@ function bumpNextIdFromLoaded() {
 }
 
 async function loadProjectFile(file) {
+  // S16: chặn file quá lớn TRƯỚC khi đọc nội dung vào RAM.
+  if (isProjectFileTooLarge(file && file.size)) {
+    showToast(`File project quá lớn (${formatBytes(file.size)} > 512 MB).`, 'danger');
+    return;
+  }
   let project = null;
   try {
     project = JSON.parse(await file.text());
@@ -1419,8 +1442,13 @@ async function loadProjectFile(file) {
     showToast('File project không đọc được (không phải JSON)!', 'danger');
     return;
   }
-  if (!project || project.app !== 'pdfcraft' || !Array.isArray(project.sources) || !Array.isArray(project.pages)) {
-    showToast('File không đúng định dạng project PDF Craft!', 'danger');
+  // S4: validate TOÀN BỘ payload trước khi chạm vào state hiện tại.
+  // File không hợp lệ → toast + giữ nguyên project đang làm việc.
+  const validation = validateProjectPayload(project);
+  if (!validation.ok) {
+    console.error('Project validation failed:', validation.errors);
+    const shown = validation.errors.slice(0, 3).join(' ');
+    showToast(`File project không hợp lệ: ${shown}`, 'danger');
     return;
   }
   if ((project.version || 1) > 1) {
@@ -1430,46 +1458,25 @@ async function loadProjectFile(file) {
     if (!confirm(`Mở project sẽ thay thế ${state.pages.length} trang đang làm việc. Tiếp tục?`)) return;
   }
 
-  hideStartupGreeting();
   showToast('Đang khôi phục project...', 'success');
 
-  // Reset toàn bộ trạng thái
-  state.sources.clear();
-  state.pages = [];
-  state.groups = [];
-  state.activeGroupFilter = null;
-  state.docMeta = { title: '', author: '', subject: '', keywords: '', creator: '', ...(project.docMeta || {}) };
-  historyStack.length = 0;
-  redoStack.length = 0;
-  updateUndoButtonUI();
-  updateRedoButtonUI();
-  thumbnailCache.clear();
-  previewCache.clear();
-  pageTextCache.clear();
-  pageNormCache.clear();
-  if (searchInput) {
-    searchInput.value = '';
-    clearSearch();
-  }
-  // Ngắt observer trước khi xóa hàng loạt để detached DOM không bị giữ tham chiếu
-  thumbnailObserver.disconnect();
-  pagesGrid.innerHTML = '';
-
+  // Load vào cấu trúc TẠM — state hiện tại còn nguyên nếu có lỗi giữa chừng.
+  const tempSources = new Map();
+  const tempSourceIds = [];
+  const tempDims = [];
   try {
-    const newSourceIds = [];
-    const dimsBySource = [];
     for (const s of project.sources) {
       const bytes = base64ToArrayBuffer(s.data);
-      const pdfJsDoc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+      const pdfJsDoc = await pdfjsLib.getDocument({ data: bytes.slice(0), ...PDFJS_OPTIONS }).promise;
       const sourceId = 'src_' + (nextId++);
-      state.sources.set(sourceId, {
+      tempSources.set(sourceId, {
         name: s.name || 'document.pdf',
         bytes: bytes,
         pdfJsDoc: pdfJsDoc,
         pdfLibDoc: null,
         fileSize: s.fileSize || bytes.byteLength,
       });
-      newSourceIds.push(sourceId);
+      tempSourceIds.push(sourceId);
       // Kích thước chuẩn theo trang đầu (giống lúc nạp file)
       let w = 595, h = 842;
       try {
@@ -1477,17 +1484,28 @@ async function loadProjectFile(file) {
         w = Math.round(vp.width);
         h = Math.round(vp.height);
       } catch (e) { /* fallback A4 */ }
-      dimsBySource.push({ width: w, height: h });
+      tempDims.push({ width: w, height: h });
+    }
+
+    // S4: pageIndex phải < số trang thực của source — reject toàn bộ project
+    // nếu sai (state hiện tại vẫn còn nguyên).
+    for (let i = 0; i < project.pages.length; i++) {
+      const sp = project.pages[i];
+      const doc = tempSources.get(tempSourceIds[sp.source]);
+      if (!doc || sp.pageIndex >= doc.pdfJsDoc.numPages) {
+        throw new Error(`Trang #${i + 1} trỏ tới pageIndex ${sp.pageIndex} nhưng file nguồn chỉ có ${doc ? doc.pdfJsDoc.numPages : 0} trang.`);
+      }
     }
 
     const validGroupIds = new Set((project.groups || []).map(g => g.id));
-    state.groups = (project.groups || []).map(g => ({ id: g.id, name: g.name, color: g.color }));
+    const tempGroups = (project.groups || []).map(g => ({ id: g.id, name: g.name, color: g.color }));
 
+    const tempPages = [];
     project.pages.forEach((sp, idx) => {
-      const sourceId = newSourceIds[sp.source];
-      if (!sourceId || !state.sources.has(sourceId)) return;
-      const dims = dimsBySource[sp.source] || { width: 595, height: 842 };
-      state.pages.push({
+      const sourceId = tempSourceIds[sp.source];
+      if (!sourceId || !tempSources.has(sourceId)) return;
+      const dims = tempDims[sp.source] || { width: 595, height: 842 };
+      tempPages.push({
         id: 'p_' + (nextId++),
         sourceId: sourceId,
         pageIndex: sp.pageIndex,
@@ -1501,6 +1519,30 @@ async function loadProjectFile(file) {
         originalIndex: typeof sp.originalIndex === 'number' ? sp.originalIndex : nextOriginalIndex++,
       });
     });
+
+    // Commit: chỉ tới đây state cũ mới bị thay thế.
+    hideStartupGreeting();
+    state.sources.clear();
+    for (const [id, src] of tempSources) state.sources.set(id, src);
+    state.pages = tempPages;
+    state.groups = tempGroups;
+    state.activeGroupFilter = null;
+    state.docMeta = validation.docMeta;
+    historyStack.length = 0;
+    redoStack.length = 0;
+    updateUndoButtonUI();
+    updateRedoButtonUI();
+    thumbnailCache.clear();
+    previewCache.clear();
+    pageTextCache.clear();
+    pageNormCache.clear();
+    if (searchInput) {
+      searchInput.value = '';
+      clearSearch();
+    }
+    // Ngắt observer trước khi xóa hàng loạt để detached DOM không bị giữ tham chiếu
+    thumbnailObserver.disconnect();
+    pagesGrid.innerHTML = '';
     bumpNextIdFromLoaded();
 
     let totalBytes = 0;
@@ -1516,8 +1558,12 @@ async function loadProjectFile(file) {
     updateSelectionUI();
     renderGrid();
     renderGroupBar();
-    showToast(`Đã khôi phục project: ${state.pages.length} trang từ ${newSourceIds.length} file!`, 'success');
+    showToast(`Đã khôi phục project: ${state.pages.length} trang từ ${tempSourceIds.length} file!`, 'success');
   } catch (err) {
+    // Dọn các pdfJsDoc đã mở trong temp để không rò rỉ; state cũ còn nguyên.
+    for (const src of tempSources.values()) {
+      try { if (src.pdfJsDoc && typeof src.pdfJsDoc.destroy === 'function') src.pdfJsDoc.destroy(); } catch (e) { /* ignore */ }
+    }
     console.error('Lỗi khi mở project:', err);
     showToast('Lỗi khi mở project: ' + err.message, 'danger');
   }
@@ -2394,12 +2440,24 @@ function renderGroupBar() {
     const chip = document.createElement('div');
     chip.className = 'group-chip' + (state.activeGroupFilter === g.id ? ' active' : '');
 
-    chip.innerHTML = `
-      <span class="group-chip-dot" style="background-color: ${g.color};"></span>
-      <span>${g.name}</span>
-      <span class="group-chip-count">${count}</span>
-      <button class="group-chip-delete" title="Xóa nhóm này">×</button>
-    `;
+    // S4: dựng bằng DOM API + textContent — g.name/g.color từ file project
+    // có thể chứa HTML; không bao giờ đưa vào innerHTML.
+    const dot = document.createElement('span');
+    dot.className = 'group-chip-dot';
+    dot.style.backgroundColor = HEX_COLOR_RE.test(g.color || '') ? g.color : '#888888';
+    chip.appendChild(dot);
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = g.name;
+    chip.appendChild(nameSpan);
+    const countSpan = document.createElement('span');
+    countSpan.className = 'group-chip-count';
+    countSpan.textContent = String(count);
+    chip.appendChild(countSpan);
+    const delBtn = document.createElement('button');
+    delBtn.className = 'group-chip-delete';
+    delBtn.title = 'Xóa nhóm này';
+    delBtn.textContent = '×';
+    chip.appendChild(delBtn);
 
     chip.querySelector('.group-chip-delete').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2611,7 +2669,7 @@ function promptPdfPassword(fileName, wasWrong) {
 async function openPdfWithPassword(fileName, getBuffer) {
   try {
     // Buffer được chuyển thẳng cho pdf.js (worker), không giữ bản sao trong main thread.
-    const doc = await pdfjsLib.getDocument({ data: await getBuffer() }).promise;
+    const doc = await pdfjsLib.getDocument({ data: await getBuffer(), ...PDFJS_OPTIONS }).promise;
     return { doc, password: '' };
   } catch (err) {
     if (!isPasswordException(err)) throw err;
@@ -2621,7 +2679,7 @@ async function openPdfWithPassword(fileName, getBuffer) {
     const pw = await promptPdfPassword(fileName, wasWrong);
     if (pw === null) return null; // người dùng bỏ qua file
     try {
-      const doc = await pdfjsLib.getDocument({ data: await getBuffer(), password: pw }).promise;
+      const doc = await pdfjsLib.getDocument({ data: await getBuffer(), password: pw, ...PDFJS_OPTIONS }).promise;
       return { doc, password: pw };
     } catch (err) {
       if (!isPasswordException(err)) throw err;
@@ -4021,7 +4079,7 @@ async function finalizePdfBytesWithBookmarks(pdfBytes, pagesToExport) {
   form.append('bookmarks', new Blob([JSON.stringify(bookmarks)], { type: 'application/json' }), 'bookmarks.json');
   let response;
   try {
-    response = await fetch('/api/export/finalize', { method: 'POST', body: form });
+    response = await apiFetch('/api/export/finalize', { method: 'POST', body: form });
   } catch (err) {
     throw new Error('Không thể bảo toàn bookmark. Hãy mở giao diện bằng PDFCraft.exe rồi thử lại.');
   }
@@ -4556,7 +4614,7 @@ async function executeCompressAndExport(pagesToExport, outputFileName, options) 
     if (!options.rasterizeHeavy) {
       try {
         updateProgress(pagesToExport.length, pagesToExport.length, 'Đang tối ưu hóa cấu trúc PDF...');
-        const resp = await fetch('/api/optimize', {
+        const resp = await apiFetch('/api/optimize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/pdf' },
           body: pdfBytes
@@ -4624,7 +4682,7 @@ function setupQuitButton() {
   btnQuit.addEventListener('click', async () => {
     if (confirm('Bạn có muốn đóng và thoát phần mềm PDF Craft không?')) {
       try {
-        await fetch('/api/shutdown', { method: 'POST' });
+        await apiFetch('/api/shutdown', { method: 'POST' });
       } catch (e) {}
 
       document.body.innerHTML = `
@@ -6889,15 +6947,29 @@ function renderSignStageStamps() {
     box.style.opacity = stamp.opacity !== undefined ? stamp.opacity : 1.0;
     box.style.transform = `rotate(${stamp.rotation || 0}deg)`;
 
-    box.innerHTML = `
-      <img class="stamp-box-img" src="${stamp.dataUrl}" alt="Chữ ký / con dấu">
-      <div class="stamp-del-btn" title="Xóa con dấu này">×</div>
-      <div class="stamp-handle-rot" data-handle="rot" title="Kéo để xoay con dấu"></div>
-      <div class="stamp-handle stamp-handle-nw" data-handle="nw"></div>
-      <div class="stamp-handle stamp-handle-ne" data-handle="ne"></div>
-      <div class="stamp-handle stamp-handle-sw" data-handle="sw"></div>
-      <div class="stamp-handle stamp-handle-se" data-handle="se"></div>
-    `;
+    // S4: dựng bằng DOM API; chỉ gán img.src khi dataUrl là ảnh base64 hợp lệ
+    // (validator đã chặn data:text/html, javascript:, svg... ở lúc load).
+    const img = document.createElement('img');
+    img.className = 'stamp-box-img';
+    img.alt = 'Chữ ký / con dấu';
+    if (isValidDataUrl(stamp.dataUrl)) img.src = stamp.dataUrl;
+    box.appendChild(img);
+    const delBtn = document.createElement('div');
+    delBtn.className = 'stamp-del-btn';
+    delBtn.title = 'Xóa con dấu này';
+    delBtn.textContent = '×';
+    box.appendChild(delBtn);
+    const rotHandle = document.createElement('div');
+    rotHandle.className = 'stamp-handle-rot';
+    rotHandle.dataset.handle = 'rot';
+    rotHandle.title = 'Kéo để xoay con dấu';
+    box.appendChild(rotHandle);
+    for (const pos of ['nw', 'ne', 'sw', 'se']) {
+      const h = document.createElement('div');
+      h.className = `stamp-handle stamp-handle-${pos}`;
+      h.dataset.handle = pos;
+      box.appendChild(h);
+    }
 
     setupStampBoxInteractivity(box, stamp);
     signStageOverlay.appendChild(box);
@@ -7172,13 +7244,28 @@ function renderSignStampsList() {
     if (stamp.id === signStudioState.selectedStampId) item.classList.add('selected');
     item.dataset.stampId = stamp.id;
     const opPct = Math.round((stamp.opacity !== undefined ? stamp.opacity : 1) * 100);
-    item.innerHTML = `
-      <div class="sign-stamp-item-left">
-        <img src="${stamp.dataUrl}" alt="Dấu #${idx + 1}">
-        <span>Dấu #${idx + 1} · <span class="sign-stamp-opacity">${opPct}%</span></span>
-      </div>
-      <button type="button" class="btn btn-tool btn-danger btn-sm" title="Xóa">Xóa</button>
-    `;
+    // S4: dựng bằng DOM API; img.src chỉ gán khi dataUrl là ảnh base64 hợp lệ.
+    // Giữ nguyên span.sign-stamp-opacity (dòng 6262 cập nhật opacity qua nó).
+    const left = document.createElement('div');
+    left.className = 'sign-stamp-item-left';
+    const img = document.createElement('img');
+    img.alt = `Dấu #${idx + 1}`;
+    if (isValidDataUrl(stamp.dataUrl)) img.src = stamp.dataUrl;
+    left.appendChild(img);
+    const label = document.createElement('span');
+    label.textContent = `Dấu #${idx + 1} · `;
+    const opSpan = document.createElement('span');
+    opSpan.className = 'sign-stamp-opacity';
+    opSpan.textContent = `${opPct}%`;
+    label.appendChild(opSpan);
+    left.appendChild(label);
+    item.appendChild(left);
+    const btnDel2 = document.createElement('button');
+    btnDel2.type = 'button';
+    btnDel2.className = 'btn btn-tool btn-danger btn-sm';
+    btnDel2.title = 'Xóa';
+    btnDel2.textContent = 'Xóa';
+    item.appendChild(btnDel2);
     item.addEventListener('click', (e) => {
       if (e.target.tagName !== 'BUTTON') {
         selectStamp(stamp.id);

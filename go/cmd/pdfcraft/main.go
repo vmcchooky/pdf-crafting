@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
+
+	"golang.org/x/term"
 
 	"github.com/vmcchooky/pdf-crafting/go/pkg/pdfcraft"
 )
@@ -58,10 +62,10 @@ func printUsage() {
 	fmt.Println("  delete  <tệp.pdf> -pages <2,4> [-o <đích>]    Xóa các trang chỉ định khỏi tệp PDF")
 	fmt.Println("  rotate  <tệp.pdf> -pages <1,3-4> -angle <90> [-o <đích>]  Xoay trang theo bội số của 90 độ")
 	fmt.Println("  merge   <a.pdf> <b.pdf> [...] -o <kết_quả.pdf>  Gộp nhiều file PDF theo đúng thứ tự")
-	fmt.Println("  text    <tệp.pdf> [--page <n> | -pages <1,3>] [--password <pw>]  Trích xuất nội dung văn bản")
+	fmt.Println("  text    <tệp.pdf> [--page <n> | -pages <1,3>] [--password <pw> | --password-stdin]  Trích xuất nội dung văn bản")
 	fmt.Println("  bookmark <tệp.pdf> [--add <t> --page <n>] [--clear] [--export <f.json>] [--import-json <f.json>] [-o <đích>]  Xem/sửa mục lục")
-	fmt.Println("  encrypt <tệp.pdf> --user-pw <pw> [--owner-pw <pw>] [-o <đích>]  Mã hóa file PDF bằng mật khẩu")
-	fmt.Println("  decrypt <tệp.pdf> --password <pw> [-o <đích>]  Giải mã file PDF về bản không mật khẩu")
+	fmt.Println("  encrypt <tệp.pdf> --user-pw <pw> [--owner-pw <pw>] [-o <đích>]  Mã hóa file PDF bằng mật khẩu (hoặc --user-pw-stdin/--owner-pw-stdin)")
+	fmt.Println("  decrypt <tệp.pdf> --password <pw> [-o <đích>]  Giải mã file PDF về bản không mật khẩu (hoặc --password-stdin)")
 	fmt.Println("  meta    <tệp.pdf> [--title <t>] [--author <t>] ... [-o <đích>]  Sửa metadata tài liệu")
 	fmt.Println("  watermark <tệp.pdf> --text <chữ> [--pages <1,2>] [--font-size 48] [--rotation 45] [--opacity 0.3] [-o <đích>]  Đóng dấu chìm")
 	fmt.Println("  compress <tệp.pdf> [<tệp2.pdf> ...] [-o <đích> | -d <thư_mục>]  Tối ưu giảm dung lượng không mất dữ liệu")
@@ -104,7 +108,18 @@ func parseFlagsAndArgs(fs *flag.FlagSet, args []string) []string {
 		arg := args[i]
 		if strings.HasPrefix(arg, "-") {
 			flags = append(flags, arg)
-			// Nếu cờ có giá trị đi kèm
+			// Chỉ "ăn" token tiếp theo làm giá trị khi flag cần giá trị:
+			// - dạng --flag=value đã có giá trị trong chính token → không ăn.
+			// - flag bool (--clear, --password-stdin) không có giá trị → không ăn.
+			if strings.Contains(arg, "=") {
+				continue
+			}
+			name := strings.TrimLeft(arg, "-")
+			if f := fs.Lookup(name); f != nil {
+				if _, isBool := f.Value.(boolFlagValue); isBool {
+					continue
+				}
+			}
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				flags = append(flags, args[i+1])
 				i++
@@ -117,6 +132,66 @@ func parseFlagsAndArgs(fs *flag.FlagSet, args []string) []string {
 	reordered := append(flags, posArgs...)
 	_ = fs.Parse(reordered)
 	return fs.Args()
+}
+
+// boolFlagValue nhận diện flag bool của flag.FlagSet (IsBoolFlag chỉ có ở
+// boolValue nội bộ) — dùng để parseFlagsAndArgs không "ăn" nhầm token sau
+// flag bool (vd: --password-stdin file.pdf).
+type boolFlagValue interface {
+	flag.Value
+	IsBoolFlag() bool
+}
+
+// readPasswordLine đọc một dòng mật khẩu từ r, trim \r\n, reject rỗng (S12).
+func readPasswordLine(r io.Reader) (string, error) {
+	line, err := bufio.NewReader(r).ReadString('\n')
+	if err != nil && line == "" {
+		return "", fmt.Errorf("không đọc được mật khẩu từ stdin: %w", err)
+	}
+	pw := strings.TrimRight(line, "\r\n")
+	if pw == "" {
+		return "", fmt.Errorf("mật khẩu từ stdin rỗng")
+	}
+	return pw, nil
+}
+
+// resolvePasswordFlag lấy mật khẩu: --password (cũ, argv) hoặc --password-stdin.
+// Cả hai cùng set → lỗi. Flag thường được giữ để tương thích ngược, nhưng in
+// cảnh báo vì mật khẩu trong argv hiện trong process list.
+func resolvePasswordFlag(flagVal string, useStdin bool, stdin io.Reader) (string, error) {
+	if flagVal != "" && useStdin {
+		return "", fmt.Errorf("chỉ dùng một trong --password hoặc --password-stdin")
+	}
+	if useStdin {
+		return readPasswordLine(stdin)
+	}
+	if flagVal != "" {
+		fmt.Fprintln(os.Stderr, "Cảnh báo: mật khẩu trong argv hiện trong process list — nên dùng --password-stdin hoặc nhập tương tác.")
+	}
+	return flagVal, nil
+}
+
+// resolveRequiredPassword như resolvePasswordFlag, nhưng khi không có nguồn
+// nào thì nhập tương tác nếu stdin là terminal, ngược lại báo lỗi hướng dẫn.
+func resolveRequiredPassword(flagVal string, useStdin bool, stdin io.Reader) (string, error) {
+	pw, err := resolvePasswordFlag(flagVal, useStdin, stdin)
+	if err != nil || pw != "" {
+		return pw, err
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return "", fmt.Errorf("thiếu mật khẩu: dùng --password-stdin (echo <pw> | pdfcraft ...) hoặc chạy trong terminal để nhập")
+	}
+	fmt.Fprint(os.Stderr, "Mật khẩu: ")
+	b, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", fmt.Errorf("không đọc được mật khẩu: %w", err)
+	}
+	pw = strings.TrimSpace(string(b))
+	if pw == "" {
+		return "", fmt.Errorf("mật khẩu rỗng")
+	}
+	return pw, nil
 }
 
 func isPdfOrExistingFile(path string) bool {
@@ -226,19 +301,26 @@ func main() {
 
 func runInfo(args []string) {
 	fs := flag.NewFlagSet("info", flag.ExitOnError)
+	passwordStdin := fs.Bool("password-stdin", false, "Đọc mật khẩu mở file từ stdin (một dòng, thay cho --password)")
 	password := fs.String("password", "", "Mật khẩu mở file (nếu file mã hóa)")
 	tail := parseFlagsAndArgs(fs, args)
 
 	if len(tail) < 1 {
-		fmt.Println("Cách dùng: pdfcraft info <tệp.pdf> [--password <mật_khẩu>]")
+		fmt.Println("Cách dùng: pdfcraft info <tệp.pdf> [--password <mật_khẩu> | --password-stdin]")
 		os.Exit(1)
 	}
 	inputFile := tail[0]
 
+	// S12: mật khẩu qua stdin thay cho argv.
+	pw, err := resolvePasswordFlag(*password, *passwordStdin, os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
+		os.Exit(1)
+	}
+
 	var info *pdfcraft.DocInfo
-	var err error
-	if *password != "" {
-		info, err = pdfcraft.GetInfoWithPassword(inputFile, *password)
+	if pw != "" {
+		info, err = pdfcraft.GetInfoWithPassword(inputFile, pw)
 	} else {
 		info, err = pdfcraft.GetInfo(inputFile)
 	}
@@ -572,13 +654,14 @@ func runMerge(args []string) {
 
 func runText(args []string) {
 	fs := flag.NewFlagSet("text", flag.ExitOnError)
+	passwordStdin := fs.Bool("password-stdin", false, "Đọc mật khẩu mở file từ stdin (một dòng, thay cho --password)")
 	page := fs.Int("page", 0, "Chỉ trích xuất 1 trang (1-based, 0 = tất cả)")
 	pages := fs.String("pages", "", "Dải trang cần trích xuất (ví dụ: '1,3,5-7', mặc định: tất cả)")
 	password := fs.String("password", "", "Mật khẩu mở file (nếu file mã hóa)")
 	tail := parseFlagsAndArgs(fs, args)
 
 	if len(tail) < 1 {
-		fmt.Println("Cách dùng: pdfcraft text <tệp.pdf> [--page <n> | -pages <1,3>] [--password <mật_khẩu>]")
+		fmt.Println("Cách dùng: pdfcraft text <tệp.pdf> [--page <n> | -pages <1,3>] [--password <mật_khẩu> | --password-stdin]")
 		os.Exit(1)
 	}
 	inFile := tail[0]
@@ -597,8 +680,14 @@ func runText(args []string) {
 
 	var texts map[int]string
 	var err error
-	if *password != "" {
-		texts, err = pdfcraft.ExtractTextWithPassword(inFile, *password, sel)
+	// S12: mật khẩu qua stdin thay cho argv.
+	pw, pwErr := resolvePasswordFlag(*password, *passwordStdin, os.Stdin)
+	if pwErr != nil {
+		fmt.Fprintf(os.Stderr, "[LỖI] %v\n", pwErr)
+		os.Exit(1)
+	}
+	if pw != "" {
+		texts, err = pdfcraft.ExtractTextWithPassword(inFile, pw, sel)
 	} else {
 		texts, err = pdfcraft.ExtractText(inFile, sel)
 	}
@@ -636,6 +725,7 @@ func printBookmarkTree(marks []pdfcraft.Bookmark, level int) {
 
 func runBookmark(args []string) {
 	fs := flag.NewFlagSet("bookmark", flag.ExitOnError)
+	passwordStdin := fs.Bool("password-stdin", false, "Đọc mật khẩu mở file từ stdin (một dòng, thay cho --password)")
 	addTitle := fs.String("add", "", "Thêm bookmark cấp cao nhất với tiêu đề này")
 	page := fs.Int("page", 0, "Trang đích cho --add (1-based)")
 	clear := fs.Bool("clear", false, "Xóa toàn bộ bookmark")
@@ -646,7 +736,7 @@ func runBookmark(args []string) {
 	tail := parseFlagsAndArgs(fs, args)
 
 	if len(tail) < 1 {
-		fmt.Println("Cách dùng: pdfcraft bookmark <tệp.pdf> [--add <tiêu_đề> --page <n>] [--clear] [--export <f.json>] [--import-json <f.json>] [--password <mật_khẩu>] [-o <kết_quả.pdf>]")
+		fmt.Println("Cách dùng: pdfcraft bookmark <tệp.pdf> [--add <tiêu_đề> --page <n>] [--clear] [--export <f.json>] [--import-json <f.json>] [--password <mật_khẩu> | --password-stdin] [-o <kết_quả.pdf>]")
 		os.Exit(1)
 	}
 	inFile := tail[0]
@@ -655,8 +745,15 @@ func runBookmark(args []string) {
 		targetOut = inFile
 	}
 
+	// S12: mật khẩu qua stdin thay cho argv.
+	pw, pwErr := resolvePasswordFlag(*password, *passwordStdin, os.Stdin)
+	if pwErr != nil {
+		fmt.Fprintf(os.Stderr, "[LỖI] %v\n", pwErr)
+		os.Exit(1)
+	}
+
 	if *exportJSON != "" {
-		data, err := pdfcraft.ExportBookmarks(inFile, *password)
+		data, err := pdfcraft.ExportBookmarks(inFile, pw)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
 			os.Exit(1)
@@ -676,7 +773,7 @@ func runBookmark(args []string) {
 			fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
 			os.Exit(1)
 		}
-		if err := pdfcraft.ImportBookmarks(inFile, targetOut, data, *password); err != nil {
+		if err := pdfcraft.ImportBookmarks(inFile, targetOut, data, pw); err != nil {
 			fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
 			os.Exit(1)
 		}
@@ -684,7 +781,7 @@ func runBookmark(args []string) {
 		return
 	}
 	if *clear {
-		if err := pdfcraft.ClearBookmarks(inFile, targetOut, *password); err != nil {
+		if err := pdfcraft.ClearBookmarks(inFile, targetOut, pw); err != nil {
 			fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
 			os.Exit(1)
 		}
@@ -696,7 +793,7 @@ func runBookmark(args []string) {
 			fmt.Fprintln(os.Stderr, "[LỖI] --add cần kèm --page (số trang 1-based)")
 			os.Exit(1)
 		}
-		if err := pdfcraft.AddBookmark(inFile, targetOut, *addTitle, *page, *password); err != nil {
+		if err := pdfcraft.AddBookmark(inFile, targetOut, *addTitle, *page, pw); err != nil {
 			fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
 			os.Exit(1)
 		}
@@ -704,7 +801,7 @@ func runBookmark(args []string) {
 		return
 	}
 
-	marks, err := pdfcraft.ListBookmarks(inFile, *password)
+	marks, err := pdfcraft.ListBookmarks(inFile, pw)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
 		os.Exit(1)
@@ -718,13 +815,16 @@ func runBookmark(args []string) {
 
 func runEncrypt(args []string) {
 	fs := flag.NewFlagSet("encrypt", flag.ExitOnError)
+	userPWStdin := fs.Bool("user-pw-stdin", false, "Đọc mật khẩu người dùng từ stdin (một dòng, thay cho --user-pw)")
+	ownerPWStdin := fs.Bool("owner-pw-stdin", false, "Đọc mật khẩu chủ sở hữu từ stdin (một dòng, thay cho --owner-pw)")
 	userPW := fs.String("user-pw", "", "Mật khẩu người dùng (bắt buộc để mở file)")
 	ownerPW := fs.String("owner-pw", "", "Mật khẩu chủ sở hữu toàn quyền (mặc định: giống user-pw)")
 	outFile := fs.String("o", "", "Đường dẫn file kết quả (ghi đè file gốc nếu để trống)")
 	tail := parseFlagsAndArgs(fs, args)
 
-	if len(tail) < 1 || *userPW == "" {
+	if len(tail) < 1 {
 		fmt.Println("Cách dùng: pdfcraft encrypt <tệp.pdf> --user-pw <mật_khẩu> [--owner-pw <mật_khẩu>] [-o <kết_quả.pdf>]")
+		fmt.Println("           hoặc: echo <pw> | pdfcraft encrypt <tệp.pdf> --user-pw-stdin [--owner-pw-stdin]")
 		os.Exit(1)
 	}
 	inFile := tail[0]
@@ -733,8 +833,20 @@ func runEncrypt(args []string) {
 		targetOut = inFile
 	}
 
+	// S12: mật khẩu qua stdin hoặc nhập tương tác thay cho argv.
+	user, err := resolveRequiredPassword(*userPW, *userPWStdin, os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
+		os.Exit(1)
+	}
+	owner, err := resolvePasswordFlag(*ownerPW, *ownerPWStdin, os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
+		os.Exit(1)
+	}
+
 	fmt.Printf("[*] Đang mã hóa '%s' bằng mật khẩu...\n", filepath.Base(inFile))
-	if err := pdfcraft.EncryptPdf(inFile, targetOut, *userPW, *ownerPW); err != nil {
+	if err := pdfcraft.EncryptPdf(inFile, targetOut, user, owner); err != nil {
 		fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
 		os.Exit(1)
 	}
@@ -743,12 +855,14 @@ func runEncrypt(args []string) {
 
 func runDecrypt(args []string) {
 	fs := flag.NewFlagSet("decrypt", flag.ExitOnError)
+	passwordStdin := fs.Bool("password-stdin", false, "Đọc mật khẩu mở file từ stdin (một dòng, thay cho --password)")
 	password := fs.String("password", "", "Mật khẩu mở file")
 	outFile := fs.String("o", "", "Đường dẫn file kết quả (ghi đè file gốc nếu để trống)")
 	tail := parseFlagsAndArgs(fs, args)
 
-	if len(tail) < 1 || *password == "" {
+	if len(tail) < 1 {
 		fmt.Println("Cách dùng: pdfcraft decrypt <tệp.pdf> --password <mật_khẩu> [-o <kết_quả.pdf>]")
+		fmt.Println("           hoặc: echo <pw> | pdfcraft decrypt <tệp.pdf> --password-stdin [-o <kết_quả.pdf>]")
 		os.Exit(1)
 	}
 	inFile := tail[0]
@@ -757,8 +871,15 @@ func runDecrypt(args []string) {
 		targetOut = inFile
 	}
 
+	// S12: mật khẩu qua stdin hoặc nhập tương tác thay cho argv.
+	pw, err := resolveRequiredPassword(*password, *passwordStdin, os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
+		os.Exit(1)
+	}
+
 	fmt.Printf("[*] Đang giải mã '%s'...\n", filepath.Base(inFile))
-	if err := pdfcraft.DecryptPdf(inFile, targetOut, *password); err != nil {
+	if err := pdfcraft.DecryptPdf(inFile, targetOut, pw); err != nil {
 		fmt.Fprintf(os.Stderr, "[LỖI] %v\n", err)
 		os.Exit(1)
 	}
