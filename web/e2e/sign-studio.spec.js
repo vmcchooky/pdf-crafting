@@ -433,12 +433,14 @@ test.describe('Sign Studio redesign', () => {
     await picker.locator('summary').click();
     await expect(picker.locator('details')).toBeVisible();
     // CI (Linux) render với font metrics phân số: preview nằm đúng mép fold
-    // của panel (scrollHeight 480 > clientHeight 240) và bị cắt ~0.3px dưới
-    // đáy vùng nhìn thấy — scroll vào view trước khi đo, assertion lúc này
-    // kiểm tra "không bị cắt khi đã trong view" thay vì vị trí fold ngẫu
-    // nhiên theo nền tảng.
+    // của panel (scrollHeight 480 > clientHeight 240), bị cắt ~0.3px dưới đáy
+    // vùng nhìn thấy; scrollIntoViewIfNeeded bỏ qua vì >99% đã visible. Cuộn
+    // vào giữa panel để assertion kiểm tra "nằm gọn trong panel khi đã trong
+    // view" (vẫn bắt lỗi palette cao hơn panel) thay vì vị trí fold ngẫu
+    // nhiên theo nền tảng. 4 assertion metrics ngang giữ nguyên.
     await page.evaluate(() =>
-      document.querySelector('#penColorPicker .write-color-preview').scrollIntoViewIfNeeded());
+      document.querySelector('#penColorPicker .write-color-preview')
+        .scrollIntoView({ block: 'center' }));
     await expect.poll(async () => page.evaluate(() => {
       const panel = document.querySelector('.sign-panel-scroll').getBoundingClientRect();
       const preview = document.querySelector('#penColorPicker .write-color-preview').getBoundingClientRect();
