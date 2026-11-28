@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -87,6 +88,9 @@ func TestParseFlagsAndArgsBoolFlag(t *testing.T) {
 func buildPdfcraftBinary(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "pdfcraft-test")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
 	cmd := exec.Command("go", "build", "-o", bin, ".")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
