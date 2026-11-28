@@ -491,11 +491,13 @@ func consumeInitialFile() string {
 }
 
 // sessionTokenHeader là tên header mang token phiên cho mọi /api/*.
+// #nosec G101 -- tên header, không phải credential.
 const sessionTokenHeader = "X-PDFCraft-Token"
 
 // tokenPlaceholder là chuỗi trong web/index.html được server thay bằng token
 // phiên khi phục vụ trang chính. Placeholder không bao giờ xuất hiện trong
 // file JS tĩnh, URL hay log.
+// #nosec G101 -- placeholder được server thay bằng token phiên, không phải credential.
 const tokenPlaceholder = "__PDFCRAFT_TOKEN__"
 
 // newSessionToken sinh token phiên ngẫu nhiên 32 byte (hex 64 ký tự) bằng

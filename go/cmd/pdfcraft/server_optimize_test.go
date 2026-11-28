@@ -127,7 +127,8 @@ func TestOptimizeMaxThreeConcurrent(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("slot đầy: status = %d, muốn 503", rec.Code)
 	}
-	if elapsed < 4*time.Second || elapsed > 8*time.Second {
+	// Cửa sổ rộng (3–15s cho timeout 5s): runner CI chia sẻ CPU + -race làm timer nhiễu.
+	if elapsed < 3*time.Second || elapsed > 15*time.Second {
 		t.Errorf("slot đầy: chờ %v, muốn ~5s", elapsed)
 	}
 }

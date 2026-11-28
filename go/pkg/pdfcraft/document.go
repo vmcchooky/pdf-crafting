@@ -833,12 +833,13 @@ var fileSync = func(f *os.File) error { return f.Sync() }
 // syncFile fsync một file đã tồn tại xuống đĩa: mở O_RDWR, Sync, đóng.
 // Trả lỗi nếu mở/sync/đóng thất bại.
 func syncFile(path string) error {
+	// #nosec G304 -- path là file tạm do saveSafely tạo trong thư mục tạm của app, không phải input người dùng.
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}
 	if err := fileSync(f); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	return f.Close()
@@ -851,6 +852,7 @@ func syncDir(dir string) {
 	if runtime.GOOS == "windows" {
 		return
 	}
+	// #nosec G304 -- dir là thư mục chứa file tạm do app tạo, không phải input người dùng.
 	f, err := os.Open(dir)
 	if err != nil {
 		return
@@ -942,13 +944,13 @@ func copyFile(src, dst string) error {
 
 	buf := make([]byte, 32*1024)
 	if _, err := io.CopyBuffer(outF, inF, buf); err != nil {
-		outF.Close()
+		_ = outF.Close()
 		return err
 	}
 	// S14: fsync đích trước khi đóng — nếu không dữ liệu có thể chưa xuống
 	// đĩa dù Close thành công.
 	if err := fileSync(outF); err != nil {
-		outF.Close()
+		_ = outF.Close()
 		return err
 	}
 	if err := outF.Close(); err != nil {

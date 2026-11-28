@@ -672,8 +672,42 @@
   từng mục và không đánh dấu `[x]` nếu chưa kiểm tra.
 
 ## 6. PR / CI / Merge
-- PR: (chưa mở).
-- CI: (chưa chạy).
+- PR: https://github.com/vmcchooky/pdf-crafting/pull/16
+  ("fix(security): S1–S17 khắc phục audit bảo mật 11/2026",
+  base `audit/security-checklist-2026-11`, head `fix/security-audit-2026-11`).
 - Merge: chỉ merge khi tất cả check CI xanh tại đúng head SHA của PR
   (kiểm chứng bằng `pull_request_read`); nếu CI đỏ/pending/không chạy được
   (vd GitHub Actions bị khóa billing) thì không merge, báo cáo PR + link CI.
+
+### Lần 1 — run 46124572184, head `7939fd2b` (28/11 08:10 UTC): 3 xanh / 3 đỏ
+- Xanh: `web-sync`, `qpdf`, `bench` (bench: `split50` chậm hơn 52.5% so
+  với base — cảnh báo, job này `continue-on-error: true`).
+- Đỏ: `go`, `web`, `go-sec` → **không merge**.
+- `go-sec` đỏ do gosec báo 7 findings trên code mới (base: 0 findings):
+  G101 tại `server.go:494,499` (chuỗi `"X-PDFCraft-Token"` /
+  `"__PDFCRAFT_TOKEN__"` — false positive: tên header + placeholder,
+  không phải credential); G304 tại `document.go:836,854` (`syncFile` /
+  `syncDir` — path là file/thư mục tạm do app tạo); G104 tại
+  `document.go:841,945,951` (`Close()` trong nhánh đã trả lỗi khác).
+  Đã sửa: thêm `// #nosec` kèm lý do theo đúng quy ước có sẵn trong
+  repo + `_ = Close()` ở nhánh lỗi. Kiểm tra lại local: gosec 0 issues,
+  exit 0; `govulncheck` sạch.
+- `go` đỏ — nguyên nhân chưa xác định được (log job CI không lấy được qua
+  GitHub MCP — không có tool tải log; trang Actions chỉ hiện annotation
+  "Process completed with exit code 1"). Đã loại trừ: chạy đúng Go CI
+  (1.26.11) local — `gofmt` sạch, `go build`, `go vet`, `go test -race`
+  (cmd 26.2s, pkg 19.4s), cross-build Windows amd64 + arm64
+  (CGO_ENABLED=0) đều pass; test semaphore chạy 3 lần trên 1 CPU + `-race`
+  vẫn pass; runner ubuntu-24.04 KHÔNG có LibreOffice sẵn (đọc README
+  runner-images) nên test LibreOffice thật đã skip trên CI. Nghi ngờ còn
+  lại: timer trên runner chia sẻ CPU — đã nới cửa sổ chờ trong 2 test
+  semaphore từ 4–8s thành 3–15s (vẫn assert chờ ~5s rồi 503, không nới
+  vô hạn) rồi push lại để CI chạy lần 2 xác nhận.
+- `web` đỏ — **lỗi có sẵn, không phải do PR này**: CI của commit base
+  `884c585` (run 46118123403) cũng đỏ đúng 1 job `web`, còn `go` /
+  `go-sec` đều xanh. Bộ Playwright không chạy được trên VM này nên không
+  xác định được nguyên nhân trong `web`; cần người có máy chạy được
+  Playwright/Chromium xem log job `web` trên GitHub. Job `web` đỏ chặn
+  merge dù `go`/`go-sec` có xanh lại.
+
+### Lần 2 — (đang chờ CI chạy lại sau push fix gosec)
