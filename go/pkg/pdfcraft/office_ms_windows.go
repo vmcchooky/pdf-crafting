@@ -85,6 +85,8 @@ func convertBatchMSOffice(ctx context.Context, batch []string, tmpDir string) er
 // Script PowerShell: mở đúng ứng dụng Office theo đuôi file và xuất PDF.
 // Hằng số: Word ExportAsFixedFormat wdExportFormatPDF=17,
 // Excel ExportAsFixedFormat xlTypePDF=0, PowerPoint SaveAs ppSaveAsPDF=32.
+// S13: Word/Excel đặt AskToUpdateLinks=false; PowerPoint không có thuộc tính
+// này qua COM nên không đặt được (ghi residual risk trong report).
 const msOfficeScript = `
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -99,6 +101,7 @@ try {
         $word.Visible = $false
         $word.DisplayAlerts = 0
         $word.EnableEvents = $false
+        $word.AskToUpdateLinks = $false
         $word.AutomationSecurity = 3
       }
       $doc = $word.Documents.Open($job.src, $false, $true)
@@ -109,6 +112,7 @@ try {
         $excel.Visible = $false
         $excel.DisplayAlerts = $false
         $excel.EnableEvents = $false
+        $excel.AskToUpdateLinks = $false
         $excel.AutomationSecurity = 3
       }
       $wb = $excel.Workbooks.Open($job.src, 0, $true)

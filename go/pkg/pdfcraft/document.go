@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -246,11 +247,20 @@ func MovePage(pdfPath, outPath string, fromPage, toPage int) error {
 	}
 
 	if fromPage == toPage {
-		// Chỉ cần sao chép nếu input != output
-		if absIn != outPath {
-			return copyFile(absIn, outPath)
+		// Di chuyển một trang về đúng vị trí của nó là no-op khi đích là
+		// chính file nguồn — dù outPath viết theo kiểu tuyệt đối, tương
+		// đối hay "./". So sánh chuỗi trần (absIn != outPath) là sai vì
+		// absIn luôn tuyệt đối còn outPath mặc định là chuỗi input.
+		absOut, err := filepath.Abs(outPath)
+		if err != nil {
+			return err
 		}
-		return nil
+		if sameFile(absIn, absOut) {
+			return nil
+		}
+		return saveSafely(absIn, absOut, func(tempTarget string) error {
+			return copyFile(absIn, tempTarget)
+		})
 	}
 
 	// Tạo thứ tự trang sau khi di chuyển
@@ -816,6 +826,39 @@ var tempCounter uint64
 // saveSafely ghi qua file tạm cùng thư mục rồi hoán đổi. Nếu rename thất bại
 // (ví dụ đích đang bị khóa) thì copy sang temp phụ rồi rename lại — không bao
 // giờ xóa hay ghi trực tiếp lên file đích trước khi thay thế thành công.
+// fileSync là điểm nối để test lỗi sync (mặc định = f.Sync() thật).
+// Đổi trong test để giả lập sync thất bại (S14).
+var fileSync = func(f *os.File) error { return f.Sync() }
+
+// syncFile fsync một file đã tồn tại xuống đĩa: mở O_RDWR, Sync, đóng.
+// Trả lỗi nếu mở/sync/đóng thất bại.
+func syncFile(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	if err := fileSync(f); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// syncDir sync thư mục chứa file (best-effort): đảm bảo bản ghi rename được
+// ghi bền xuống đĩa. Trên Windows mở thư mục để Sync không hỗ trợ → bỏ qua.
+// Lỗi sync thư mục không chặn ghi file (ghi chú trong report, S14 mục 4).
+func syncDir(dir string) {
+	if runtime.GOOS == "windows" {
+		return
+	}
+	f, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_ = f.Sync()
+}
+
 func saveSafely(inPath, outPath string, writerFunc func(tempTarget string) error) error {
 	absOut, err := filepath.Abs(outPath)
 	if err != nil {
@@ -834,7 +877,14 @@ func saveSafely(inPath, outPath string, writerFunc func(tempTarget string) error
 		return err
 	}
 
+	// S14: fsync dữ liệu xuống đĩa TRƯỚC khi rename — nếu không, mất điện
+	// có thể để lại file đích 0 byte/hỏng dù rename đã xảy ra.
+	if err := syncFile(tempFile); err != nil {
+		return fmt.Errorf("không thể sync file tạm: %w", err)
+	}
+
 	if err := os.Rename(tempFile, absOut); err == nil {
+		syncDir(filepath.Dir(absOut))
 		return nil
 	}
 
@@ -847,12 +897,37 @@ func saveSafely(inPath, outPath string, writerFunc func(tempTarget string) error
 	if err := os.Rename(replaceTemp, absOut); err != nil {
 		return fmt.Errorf("không thể thay thế tệp đích: %w", err)
 	}
+	syncDir(filepath.Dir(absOut))
 	return nil
+}
+
+// sameFile cho biết hai đường dẫn có trỏ tới cùng một file hay không.
+// Nếu cả hai tồn tại, dùng os.SameFile (bắt cả symlink/hardlink và khác
+// hoa/thường trên Windows). Nếu một bên không tồn tại, so sánh chuỗi path
+// đã Clean (EqualFold trên Windows).
+func sameFile(a, b string) bool {
+	aInfo, aErr := os.Stat(a)
+	bInfo, bErr := os.Stat(b)
+	if aErr == nil && bErr == nil {
+		return os.SameFile(aInfo, bInfo)
+	}
+	aClean := filepath.Clean(a)
+	bClean := filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(aClean, bClean)
+	}
+	return aClean == bClean
 }
 
 func copyFile(src, dst string) error {
 	cleanSrc := filepath.Clean(src)
 	cleanDst := filepath.Clean(dst)
+
+	// Defense-in-depth: không bao giờ mở đích bằng O_TRUNC khi đích chính
+	// là nguồn — nếu không file sẽ bị truncate còn 0 byte trước khi copy.
+	if sameFile(cleanSrc, cleanDst) {
+		return fmt.Errorf("copyFile: nguồn và đích là cùng một file (%s)", cleanSrc)
+	}
 
 	inF, err := os.Open(cleanSrc)
 	if err != nil {
@@ -864,11 +939,22 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer outF.Close()
 
 	buf := make([]byte, 32*1024)
-	_, err = io.CopyBuffer(outF, inF, buf)
-	return err
+	if _, err := io.CopyBuffer(outF, inF, buf); err != nil {
+		outF.Close()
+		return err
+	}
+	// S14: fsync đích trước khi đóng — nếu không dữ liệu có thể chưa xuống
+	// đĩa dù Close thành công.
+	if err := fileSync(outF); err != nil {
+		outF.Close()
+		return err
+	}
+	if err := outF.Close(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // moveResultFile chuyển kết quả từ thư mục tạm (có thể khác ổ đĩa) về đích

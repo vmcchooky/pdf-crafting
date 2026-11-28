@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="pdfcraft-token" content="__PDFCRAFT_TOKEN__">
   <title>PDF Craft - Công cụ chỉnh sửa & sắp xếp trang PDF chuyên nghiệp</title>
   <meta name="description" content="Trình biên tập PDF trực quan, mượt mà: kéo thả đổi thứ tự trang, chèn trang từ tệp khác, xóa trang và trích xuất PDF tốc độ cao.">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
@@ -17,7 +18,12 @@
     .page-card.search-current { outline: 3px solid #f59e0b; outline-offset: 2px; }
   </style>
   <!-- Thư viện xử lý PDF nội bộ (100% Offline, Non-blocking Defer) -->
-  <script src="vendor/pdf.min.js" defer></script>
+  <!-- PDF.js 4.10.38 (S5): bản ESM legacy — module script chạy theo thứ tự
+       tài liệu, trước các deferred classic script (utils.js, app.js),
+       nên window.pdfjsLib đã sẵn khi app.js chạy.
+       S15: loader tách ra file riêng (pdfjs-loader.mjs) để CSP
+       script-src 'self' cho phép — inline <script> bị chặn. -->
+  <script type="module" src="pdfjs-loader.mjs"></script>
   <script src="vendor/fflate.umd.js" defer></script>
 </head>
 <body>
@@ -89,7 +95,7 @@
         </button>
         <input type="file" id="projectFileInput" accept=".json,.pdfcraft.json,application/json" style="display: none;">
 
-        <button class="btn btn-secondary" id="btnConvertOffice" title="Chuyển file Word/Excel/PowerPoint sang PDF (cần LibreOffice)">
+        <button class="btn btn-secondary" id="btnConvertOffice" title="Chuyển file Word/Excel/PowerPoint sang PDF (cần LibreOffice). Chỉ chuyển tài liệu tin cậy — converter không phải sandbox đầy đủ.">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
             <polyline points="14 2 14 8 20 8"></polyline>

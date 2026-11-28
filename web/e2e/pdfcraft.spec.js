@@ -6,10 +6,16 @@ const { test, expect } = require('@playwright/test');
 const path = require('path');
 const fs = require('fs');
 const PDFLib = require('../vendor/pdf-lib.min.js');
-const pdfjsLib = require('../vendor/pdf.min.js');
+// S5: pdfjs-dist >= 4.2 là ESM-only (không còn UMD) — nạp động trong beforeAll
+// vì file test này là CommonJS. Dùng bản legacy giống app (vendor/pdf.min.mjs).
 const { unzipSync } = require('fflate');
+const PDFJS_OPTIONS = { isEvalSupported: false };
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = require.resolve('../vendor/pdf.worker.min.js');
+let pdfjsLib;
+test.beforeAll(async () => {
+  pdfjsLib = await import('../vendor/pdf.min.mjs');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = path.join(__dirname, '..', 'vendor', 'pdf.worker.min.mjs');
+});
 
 const FIXTURE = path.join(__dirname, 'fixtures', 'sample.pdf');
 const ENCRYPTED_FIXTURE = path.join(__dirname, 'fixtures', 'encrypted.pdf');
@@ -80,7 +86,7 @@ async function dragCard(page, sourceId, targetId, placeBefore) {
 
 async function downloadedPageWidths(download) {
   const bytes = new Uint8Array(await fs.promises.readFile(await download.path()));
-  const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+  const pdf = await pdfjsLib.getDocument({ data: bytes, ...PDFJS_OPTIONS }).promise;
   const widths = [];
   for (let index = 1; index <= pdf.numPages; index++) {
     const view = (await pdf.getPage(index)).view;
@@ -175,7 +181,7 @@ test.describe('PDF Craft Web UI', () => {
     await page.locator('#btnExportPdf').click();
     const download = await downloadPromise;
     const exportedBytes = new Uint8Array(await fs.promises.readFile(await download.path()));
-    const exported = await pdfjsLib.getDocument({ data: exportedBytes }).promise;
+    const exported = await pdfjsLib.getDocument({ data: exportedBytes, ...PDFJS_OPTIONS }).promise;
     const { info } = await exported.getMetadata();
     expect(info.Title).toBe('Edited title');
     expect(info.Author).toBe('Office team');

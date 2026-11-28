@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/vmcchooky/pdf-crafting/go/pkg/pdfcraft"
 )
@@ -102,5 +104,64 @@ func TestFinalizeExportRejectsMalformedBookmarkJSON(t *testing.T) {
 	handleFinalizeExport(rec, req)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestUIServerTimeouts (S10): Read/WriteTimeout phải là 5 phút để upload/
+// download lớn (export 512 MB, convert 120s) không bị cắt ở 60s cũ;
+// ReadHeaderTimeout giữ 10s, IdleTimeout giữ 120s.
+func TestUIServerTimeouts(t *testing.T) {
+	srv := newUIServer(nil)
+	if srv.ReadTimeout != 5*time.Minute {
+		t.Errorf("ReadTimeout = %v, muốn 5m", srv.ReadTimeout)
+	}
+	if srv.WriteTimeout != 5*time.Minute {
+		t.Errorf("WriteTimeout = %v, muốn 5m", srv.WriteTimeout)
+	}
+	if srv.ReadHeaderTimeout != 10*time.Second {
+		t.Errorf("ReadHeaderTimeout = %v, muốn 10s", srv.ReadHeaderTimeout)
+	}
+	if srv.IdleTimeout != 120*time.Second {
+		t.Errorf("IdleTimeout = %v, muốn 120s", srv.IdleTimeout)
+	}
+}
+
+// TestFinalizeExportContentLengthMatchesBody (S10): finalize stream PDF về
+// bằng io.Copy — header Content-Length phải đúng bằng số byte thực tế,
+// file tải về mở được và giữ bookmark.
+func TestFinalizeExportContentLengthMatchesBody(t *testing.T) {
+	pdfPath := filepath.Join("..", "..", "..", "web", "e2e", "fixtures", "sample.pdf")
+	pdfData, err := os.ReadFile(pdfPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bookmarkData := []byte(`[{"title":"Chapter One","page":2,"kids":[{"title":"Details","page":3}]}]`)
+	req := newFinalizeRequest(t, pdfData, bookmarkData)
+	rec := httptest.NewRecorder()
+	handleFinalizeExport(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cl, err := strconv.Atoi(rec.Header().Get("Content-Length"))
+	if err != nil {
+		t.Fatalf("Content-Length không parse được: %q", rec.Header().Get("Content-Length"))
+	}
+	if cl != rec.Body.Len() {
+		t.Errorf("Content-Length = %d, body thực tế = %d byte", cl, rec.Body.Len())
+	}
+	if !bytes.HasPrefix(rec.Body.Bytes(), []byte("%PDF")) {
+		t.Fatal("response is not a PDF")
+	}
+	resultPath := filepath.Join(t.TempDir(), "result.pdf")
+	if err := os.WriteFile(resultPath, rec.Body.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	marks, err := pdfcraft.ListBookmarks(resultPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(marks) != 1 || marks[0].Title != "Chapter One" {
+		t.Fatalf("unexpected bookmarks: %#v", marks)
 	}
 }

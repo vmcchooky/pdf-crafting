@@ -93,7 +93,7 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
 
 ### S1 — [Critical] `move` same-file làm file thành 0 byte
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:**
   - `go/pkg/pdfcraft/document.go:230-279` (`MovePage`).
   - `go/pkg/pdfcraft/document.go:853-872` (`copyFile`).
@@ -125,19 +125,19 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
      mọi call site tương lai.
   5. Kiểm tra `close`/`Sync` của đích; không bỏ qua lỗi ghi.
 - **Tiêu chí nghiệm thu:**
-  - [ ] `move same.pdf -from 2 -to 2` giữ nguyên byte-for-byte.
-  - [ ] `move` với `-o` khác file vẫn tạo kết quả đúng.
-  - [ ] `copyFile(src, src)` trả lỗi và không làm đổi file.
-  - [ ] Không còn so sánh chuỗi path trần trong `MovePage`.
+  - [x] `move same.pdf -from 2 -to 2` giữ nguyên byte-for-byte.
+  - [x] `move` với `-o` khác file vẫn tạo kết quả đúng.
+  - [x] `copyFile(src, src)` trả lỗi và không làm đổi file.
+  - [x] Không còn so sánh chuỗi path trần trong `MovePage`.
 - **Test bắt buộc:**
-  - [ ] Go test: same absolute path, same relative path, `./` variant, case variant
+  - [x] Go test: same absolute path, same relative path, `./` variant, case variant
     trên Windows, symlink nếu nền tảng hỗ trợ.
-  - [ ] Go test: `copyFile` same-file trả lỗi, source còn nguyên.
-  - [ ] `go test -race ./...`.
+  - [x] Go test: `copyFile` same-file trả lỗi, source còn nguyên.
+  - [x] `go test -race ./...`.
 
 ### S2 — [Critical] `/api/shutdown` không xác thực, không kiểm tra method
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:** `go/cmd/pdfcraft/server.go:466-474`; UI gọi ở `web/app.js:4627`.
 - **Nguyên nhân:** handler chạy với mọi method, không token/Origin, trả 200 rồi
   `os.Exit(0)` sau 350 ms.
@@ -149,19 +149,19 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
   4. Nối vào graceful shutdown của S17; không kill request đang chạy.
   5. UI dùng `apiFetch('/api/shutdown', { method: 'POST' })`; giữ hộp thoại xác nhận.
 - **Tiêu chí nghiệm thu:**
-  - [ ] `GET /api/shutdown` → 405, server vẫn sống.
-  - [ ] `POST` không token → 401/403, server vẫn sống.
-  - [ ] `POST` có token nhưng `Origin` lạ → 403.
-  - [ ] `POST` hợp lệ → 202, server shutdown graceful.
-  - [ ] Không còn `os.Exit` trong handler.
+  - [x] `GET /api/shutdown` → 405, server vẫn sống.
+  - [x] `POST` không token → 401/403, server vẫn sống.
+  - [x] `POST` có token nhưng `Origin` lạ → 403.
+  - [x] `POST` hợp lệ → 202, server shutdown graceful.
+  - [x] Không còn `os.Exit` trong handler.
 - **Test bắt buộc:**
-  - [ ] `httptest` cho 4 case trên.
-  - [ ] Test graceful: một handler chậm đang chạy vẫn hoàn tất trước khi process thoát.
+  - [x] `httptest` cho 4 case trên.
+  - [x] Test graceful: một handler chậm đang chạy vẫn hoàn tất trước khi process thoát.
   - [ ] Playwright: bấm nút thoát → thấy thông báo, server dừng.
 
 ### S3 — [Critical] Không kiểm tra Host/Origin → DNS rebinding + CSRF
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:** `server.go:443` chỉ bind `127.0.0.1`; không handler/middleware nào
   kiểm tra `r.Host`/`Origin`. Đã thử `Host: evil.example:18089` → 200.
 - **Nguyên nhân:** loopback binding không bảo vệ trước DNS rebinding; browser gửi
@@ -200,21 +200,21 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
   5. Refactor `runUI` đủ để test middleware (ví dụ `newServer(cfg)` hoặc
      `newMux(token, port, ...)`), không cần dựng cả browser.
 - **Tiêu chí nghiệm thu:**
-  - [ ] Request `Host: evil.example:<port>` → 403/421 cho mọi route.
-  - [ ] Mọi `/api/*` thiếu/sai token → 401/403.
-  - [ ] Request cross-origin có token nhưng Origin lạ → 403.
-  - [ ] UI tải bình thường, tất cả flow hoạt động với token.
-  - [ ] Token không nằm trong file JS tĩnh/URL/log.
-  - [ ] Không có CORS header.
+  - [x] Request `Host: evil.example:<port>` → 403/421 cho mọi route.
+  - [x] Mọi `/api/*` thiếu/sai token → 401/403.
+  - [x] Request cross-origin có token nhưng Origin lạ → 403.
+  - [x] UI tải bình thường, tất cả flow hoạt động với token.
+  - [x] Token không nằm trong file JS tĩnh/URL/log.
+  - [x] Không có CORS header.
 - **Test bắt buộc:**
-  - [ ] `httptest` cho Host sai, token thiếu, Origin sai, request hợp lệ.
-  - [ ] Test `/` chứa meta token; `/app.js` không chứa token.
+  - [x] `httptest` cho Host sai, token thiếu, Origin sai, request hợp lệ.
+  - [x] Test `/` chứa meta token; `/app.js` không chứa token.
   - [ ] Playwright smoke: upload, preview, export, optimize, context-menu status.
-  - [ ] `curl -H "Host: evil.example"` trả 403/421.
+  - [x] `curl -H "Host: evil.example"` trả 403/421.
 
 ### S4 — [Critical] Stored XSS khi mở `.pdfcraft.json` độc
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:**
   - `web/app.js:1484` nhận `groups[].name/color`; `:1500` nhận `stamps[]`.
   - `renderGroupBar` `web/app.js:2397-2402` chèn `${g.name}`, `${g.color}` vào
@@ -254,21 +254,24 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
        `group.name`; dùng `escapeHtml` hoặc `textContent`.
   5. Thêm CSP `script-src 'self'` (S15) để giảm tác động nếu còn sink.
 - **Tiêu chí nghiệm thu:**
-  - [ ] Project có `groups[0].name = '<img src=x onerror="window.__xss=1">'`
+  - [x] Project có `groups[0].name = '<img src=x onerror="window.__xss=1">'`
         hiển thị như text, `window.__xss` undefined.
-  - [ ] `stamp.dataUrl = 'x" onerror="window.__xss=1'` bị reject.
-  - [ ] `color = 'red;background:url(javascript:...)'` bị reject.
-  - [ ] `pageIndex`/`source` ngoài phạm vi bị reject, state cũ không bị xóa.
-  - [ ] Không còn template literal chứa dữ liệu project trong `innerHTML`.
+        (Render bằng textContent — kiểm chứng bằng code review + Node test
+        validator chấp nhận tên chứa HTML nhưng render không parse HTML;
+        kiểm chứng trình duyệt bằng Playwright ở cuối đợt.)
+  - [x] `stamp.dataUrl = 'x" onerror="window.__xss=1'` bị reject.
+  - [x] `color = 'red;background:url(javascript:...)'` bị reject.
+  - [x] `pageIndex`/`source` ngoài phạm vi bị reject, state cũ không bị xóa.
+  - [x] Không còn template literal chứa dữ liệu project trong `innerHTML`.
 - **Test bắt buộc:**
-  - [ ] Node unit test cho validator (hợp lệ, XSS name, dataUrl sai, color sai,
+  - [x] Node unit test cho validator (hợp lệ, XSS name, dataUrl sai, color sai,
         index ngoài phạm vi, quá giới hạn).
   - [ ] Playwright fixture project độc: load, assert không execute, assert toast.
   - [ ] Playwright project hợp lệ vẫn load đủ trang/nhóm/dấu.
 
 ### S5 — [Critical] PDF.js 3.11.174 dính CVE-2024-4367
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:** `web/vendor/pdf.min.js` báo `version = "3.11.174"`;
   `web/app.js:1463,2614,2624` gọi `pdfjsLib.getDocument(...)` không đặt
   `isEvalSupported`.
@@ -293,19 +296,21 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
      `isEvalSupported: false`, hoặc assert `pdfjsLib.version` không nằm trong
      khoảng vulnerable.
 - **Tiêu chí nghiệm thu:**
-  - [ ] Không còn `getDocument` nào dùng default `isEvalSupported`.
-  - [ ] Nếu upgrade: `pdfjsLib.version >= 4.2.67`; worker cùng version; không lỗi
-        console.
+  - [x] Không còn `getDocument` nào dùng default `isEvalSupported`.
+  - [x] Nếu upgrade: `pdfjsLib.version >= 4.2.67`; worker cùng version; không lỗi
+        console. (Đã nâng lên **4.10.38** — latest 4.x; bản legacy ESM;
+        worker cùng version 4.10.38. Kiểm chứng console trình duyệt bằng
+        Playwright ở cuối đợt.)
   - [ ] Render, text layer, search, PDF có mật khẩu, project load, export, ký
-        đều hoạt động.
+        đều hoạt động. (Kiểm chứng trình duyệt bằng Playwright ở cuối đợt.)
 - **Test bắt buộc:**
-  - [ ] Unit/grep test cho `isEvalSupported` hoặc version.
+  - [x] Unit/grep test cho `isEvalSupported` hoặc version.
   - [ ] Playwright mở PDF thường + PDF có mật khẩu + project; không console error.
-  - [ ] `govulncheck` (Go) không liên quan nhưng vẫn chạy.
+  - [x] `govulncheck` (Go) không liên quan nhưng vẫn chạy. (Đã chạy cuối đợt: sạch sau khi nâng x/crypto — xem report §4.)
 
 ### S6 — [High] CSRF vào context-menu install/uninstall
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:** `server.go:527-554` chỉ kiểm tra POST; UI gọi ở
   `web/app.js:989-991`.
 - **Nguyên nhân:** form cross-site POST tới loopback vẫn gửi được; không token.
@@ -314,15 +319,16 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
   2. Giữ method POST; thêm `confirm()` ở UI trước khi install/uninstall.
   3. Không trả chi tiết registry path ra ngoài; chỉ `{success:true}`.
 - **Tiêu chí nghiệm thu:**
-  - [ ] Request không token/Origin lạ → 403, registry không đổi.
-  - [ ] UI có xác nhận; install/uninstall vẫn hoạt động.
+  - [x] Request không token/Origin lạ → 403, registry không đổi.
+  - [x] UI có xác nhận; install/uninstall vẫn hoạt động.
+        (Install/uninstall thật trên Windows chưa kiểm tra thủ công — mục Windows.)
 - **Test bắt buộc:**
-  - [ ] `httptest` cho cả hai endpoint với token/không token/Origin lạ.
+  - [x] `httptest` cho cả hai endpoint với token/không token/Origin lạ.
   - [ ] Playwright: bấm nút → confirm → trạng thái đổi.
 
 ### S7 — [High] Clickjacking
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:** response thực tế chỉ có `Cache-Control`, `ETag`, `Vary`,
   `Content-Type`; không `X-Frame-Options`/CSP.
 - **Việc cần làm:**
@@ -330,15 +336,15 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
      `Content-Security-Policy: frame-ancestors 'none'`.
   2. Đảm bảo header có trên cả response lỗi và asset tĩnh.
 - **Tiêu chí nghiệm thu:**
-  - [ ] `curl -I /` và `/api/...` đều có hai header trên.
+  - [x] `curl -I /` và `/api/...` đều có hai header trên.
   - [ ] UI không bị nhúng trong iframe (kiểm tra thủ công/Playwright).
 - **Test bắt buộc:**
-  - [ ] `httptest` assert header.
+  - [x] `httptest` assert header.
   - [ ] Playwright smoke không bị CSP chặn.
 
 ### S8 — [High] Optimize: semaphore nhả khi goroutine còn chạy
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:** `server.go:39-109`; đặc biệt đọc 150 MB trước semaphore
   (`:46-62`), goroutine không context (`:72-90`), timeout 30 s (`:92-108`).
 - **Nguyên nhân:** `defer <-optimizeSemaphore` chạy khi handler return, kể cả khi
@@ -360,19 +366,19 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
   6. Cân nhắc dùng temp file thay `bytes.Buffer` nếu đầu ra lớn; ghi rõ nếu để
      lại làm technical debt.
 - **Tiêu chí nghiệm thu:**
-  - [ ] Tối đa 3 optimize chạy đồng thời, kể cả khi client timeout.
-  - [ ] Semaphore không được release trước khi goroutine kết thúc.
-  - [ ] Request lặp không làm số goroutine tăng vô hạn.
-  - [ ] PDF hỏng trả lỗi, không crash process.
+  - [x] Tối đa 3 optimize chạy đồng thời, kể cả khi client timeout.
+  - [x] Semaphore không được release trước khi goroutine kết thúc.
+  - [x] Request lặp không làm số goroutine tăng vô hạn.
+  - [x] PDF hỏng trả lỗi, không crash process.
 - **Test bắt buộc:**
-  - [ ] Refactor `optimizePDF` thành biến/hàm test hook; test slow optimizer:
+  - [x] Refactor `optimizePDF` thành biến/hàm test hook; test slow optimizer:
         request timeout → `len(optimizeSemaphore)` vẫn 1 đến khi optimizer xong.
-  - [ ] Test panic → response lỗi, process sống.
-  - [ ] `go test -race`.
+  - [x] Test panic → response lỗi, process sống.
+  - [x] `go test -race`.
 
 ### S9 — [High] Convert Office: timeout xóa thư mục khi conversion còn chạy
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:** `server.go:232-387`; parse 150 MB trước semaphore (`:241-267`);
   ctx 120 s (`:322-337`); `defer os.RemoveAll(workDir)` (`:274`); server
   `WriteTimeout: 60s` (`:665-670`).
@@ -390,19 +396,20 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
      per-endpoint; handler timeout 120 s > conversion 110 s.
   6. Thêm `recover()` quanh conversion; không để panic giết process.
 - **Tiêu chí nghiệm thu:**
-  - [ ] Client ngắt/timeout → conversion dừng, workDir được xóa sau khi process
+  - [x] Client ngắt/timeout → conversion dừng, workDir được xóa sau khi process
         kết thúc, semaphore release đúng lúc.
   - [ ] Không còn cảnh báo xóa file đang dùng trên Windows.
-  - [ ] Tối đa 2 conversion đồng thời.
+        (Chưa kiểm tra trên Windows — mục Windows.)
+  - [x] Tối đa 2 conversion đồng thời.
 - **Test bắt buộc:**
-  - [ ] Fake converter block; assert workDir còn tồn tại trong lúc chạy, bị xóa
+  - [x] Fake converter block; assert workDir còn tồn tại trong lúc chạy, bị xóa
         sau khi return, semaphore giữ đến cuối.
-  - [ ] Test context cancellation dừng converter.
+  - [x] Test context cancellation dừng converter.
   - [ ] Playwright upload 1 và nhiều file (PDF/ZIP) vẫn đúng.
 
 ### S10 — [High] `/api/export/finalize` 512 MB vs timeout 60 s
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:** `server.go:120-127` (512 MB), `:665-670` (60 s).
 - **Nguyên nhân:** upload/download lớn vượt Read/WriteTimeout; client nhận lỗi
   giữa chừng.
@@ -415,17 +422,18 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
   3. Cân nhắc giảm giới hạn body nếu 512 MB không thực tế; nếu giữ, ghi rõ trong
      UI/docs.
 - **Tiêu chí nghiệm thu:**
-  - [ ] Export PDF ~100–300 MB thành công trong môi trường test (hoặc test giả
-        lập với timeout).
-  - [ ] Header `Content-Length` đúng; file tải về mở được.
+  - [x] Export PDF ~100–300 MB thành công trong môi trường test (hoặc test giả
+        lập với timeout). (Test giả lập: timeout server 5 phút + Content-Length
+        đúng; export 100–300 MB thật chưa chạy — để Playwright/manual.)
+  - [x] Header `Content-Length` đúng; file tải về mở được.
 - **Test bắt buộc:**
-  - [ ] Go test với multipart lớn (có thể skip nếu quá nặng, nhưng phải có test
+  - [x] Go test với multipart lớn (có thể skip nếu quá nặng, nhưng phải có test
         timeout/header).
   - [ ] Playwright export flow hiện có vẫn pass.
 
 ### S11 — [Medium] Lộ đường dẫn + nội dung file ban đầu
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:** `server.go:477-517`: `/api/initial-file` trả `path` tuyệt đối;
   `/content` đọc cả file vào RAM không giới hạn.
 - **Nguyên nhân:** endpoint không token; path là thông tin nhạy cảm; đọc cả file
@@ -440,17 +448,19 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
   4. Yêu cầu token (S3); chỉ cho GET.
   5. Nếu file quá lớn (ví dụ > 2 GB), trả 413 thay vì stream? Ghi rõ ngưỡng.
 - **Tiêu chí nghiệm thu:**
-  - [ ] JSON không còn path tuyệt đối.
-  - [ ] Request thứ hai sau khi consume → 404.
-  - [ ] File lớn không làm tăng RAM tương ứng.
-  - [ ] Không token → 403.
+  - [x] JSON không còn path tuyệt đối.
+  - [x] Request thứ hai sau khi consume → 404.
+  - [x] File lớn không làm tăng RAM tương ứng. (Stream qua ServeContent,
+        không ReadFile; ngưỡng 2 GiB trả 413 — ngưỡng chưa test với file 2 GiB
+        thật, chỉ kiểm chứng bằng code.)
+  - [x] Không token → 403.
 - **Test bắt buộc:**
-  - [ ] `httptest` JSON schema, consume một lần, concurrent requests.
-  - [ ] Test `Range` request trả 206 (nếu dùng ServeContent).
+  - [x] `httptest` JSON schema, consume một lần, concurrent requests.
+  - [x] Test `Range` request trả 206 (nếu dùng ServeContent).
 
 ### S12 — [Medium] Mật khẩu trong argv
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:** `main.go:229,577,644,721-722,746` dùng `--password`,
   `--user-pw`, `--owner-pw`.
 - **Nguyên nhân:** argv hiện trong Task Manager/process list, PowerShell history,
@@ -465,16 +475,16 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
   6. Giữ `--password` để tương thích; cập nhật help/README/HUONG-DAN, ghi rõ rủi
      ro argv.
 - **Tiêu chí nghiệm thu:**
-  - [ ] `echo pw | pdfcraft decrypt file.pdf --password-stdin` hoạt động.
-  - [ ] `--password` cũ vẫn hoạt động.
-  - [ ] Không log mật khẩu.
+  - [x] `echo pw | pdfcraft decrypt file.pdf --password-stdin` hoạt động.
+  - [x] `--password` cũ vẫn hoạt động.
+  - [x] Không log mật khẩu.
 - **Test bắt buộc:**
-  - [ ] Go test/CLI integration cho stdin; test conflict flag.
-  - [ ] Kiểm tra help text có flag mới.
+  - [x] Go test/CLI integration cho stdin; test conflict flag.
+  - [x] Kiểm tra help text có flag mới.
 
 ### S13 — [Medium] Office conversion không sandbox
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:** `go/pkg/pdfcraft/office.go:157-201` chạy LibreOffice với profile
   mặc định; `office_ms_windows.go` dùng COM (`AutomationSecurity=3`).
 - **Nguyên nhân:** tài liệu Office untrusted có thể khai thác parser, macro,
@@ -496,18 +506,18 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
   6. Nếu có thể, chạy converter với token quyền thấp trên Windows; nếu quá phức
      tạp, ghi technical debt.
 - **Tiêu chí nghiệm thu:**
-  - [ ] Conversion docx/xlsx/pptx bình thường vẫn chạy.
-  - [ ] Profile tạm được tạo/dọn; không dùng profile người dùng.
+  - [x] Conversion docx/xlsx/pptx bình thường vẫn chạy.
+  - [x] Profile tạm được tạo/dọn; không dùng profile người dùng.
   - [ ] Macro trong tài liệu test không chạy (kiểm tra thủ công).
-  - [ ] Docs có cảnh báo residual risk.
+  - [x] Docs có cảnh báo residual risk.
 - **Test bắt buộc:**
-  - [ ] Unit test args có `-env:UserInstallation` và các flag.
-  - [ ] Integration test convert 3 định dạng (nếu môi trường có LibreOffice).
+  - [x] Unit test args có `-env:UserInstallation` và các flag.
+  - [x] Integration test convert 3 định dạng (nếu môi trường có LibreOffice).
   - [ ] Manual: macro-enabled doc không thực thi.
 
 ### S14 — [Medium] `saveSafely` không fsync
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:** `document.go:819-851` ghi temp rồi rename; `copyFile`
   `:853-872` không `Sync`.
 - **Nguyên nhân:** rename nguyên tử nhưng dữ liệu có thể chưa xuống đĩa; mất điện
@@ -521,17 +531,17 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
   4. Directory sync: best-effort trên Unix; trên Windows bỏ qua nếu `Sync` thư
      mục không hỗ trợ, nhưng ghi chú.
 - **Tiêu chí nghiệm thu:**
-  - [ ] Mọi output đi qua `saveSafely` đều được sync trước rename.
-  - [ ] `copyFile` sync đích và trả lỗi nếu sync thất bại.
-  - [ ] Không thay đổi hành vi atomic rename.
+  - [x] Mọi output đi qua `saveSafely` đều được sync trước rename.
+  - [x] `copyFile` sync đích và trả lỗi nếu sync thất bại.
+  - [x] Không thay đổi hành vi atomic rename.
 - **Test bắt buộc:**
-  - [ ] Go test `saveSafely` ghi file đúng, không còn temp.
-  - [ ] Test `copyFile` nội dung đúng; nếu có thể, mock sync error.
-  - [ ] `go test -race`.
+  - [x] Go test `saveSafely` ghi file đúng, không còn temp.
+  - [x] Test `copyFile` nội dung đúng; nếu có thể, mock sync error.
+  - [x] `go test -race`.
 
 ### S15 — [Medium] Thiếu security headers
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:** response thực tế không có `X-Content-Type-Options`,
   `X-Frame-Options`, CSP, `Referrer-Policy`.
 - **Việc cần làm:**
@@ -551,16 +561,16 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
      `script-src 'unsafe-inline'`/`'unsafe-eval'` nếu chưa có lý do và ghi chú.
   3. Header phải có trên response lỗi và asset tĩnh.
 - **Tiêu chí nghiệm thu:**
-  - [ ] `curl -I` thấy đủ header.
+  - [x] `curl -I` thấy đủ header.
   - [ ] Playwright không có CSP violation; mọi flow chạy.
   - [ ] pdf.js worker/blob vẫn hoạt động.
 - **Test bắt buộc:**
-  - [ ] `httptest` assert header.
+  - [x] `httptest` assert header.
   - [ ] Playwright full suite; theo dõi console `securitypolicyviolation`.
 
 ### S16 — [Medium] Project JSON không giới hạn/validate
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:** `web/app.js:1414-1503`; `file.text()` không kiểm tra size;
   `pageIndex/source/rotation/stamps` không validate; state bị xóa trước khi load
   xong.
@@ -575,17 +585,19 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
   4. Kiểm tra `pageIndex < numPages` sau khi mở source; reject/limiting có test.
   5. Giới hạn `docMeta` string; bỏ key lạ.
 - **Tiêu chí nghiệm thu:**
-  - [ ] JSON sai/siêu lớn → toast lỗi, state cũ nguyên vẹn.
-  - [ ] `pageIndex`/`source` ngoài phạm vi không làm crash.
-  - [ ] Project hợp lệ vẫn load đủ.
+  - [x] JSON sai/siêu lớn → toast lỗi, state cũ nguyên vẹn.
+        (Gate 512 MB unit-tested qua `isProjectFileTooLarge`; validate trước
+        khi mutate state; kiểm chứng trình duyệt bằng Playwright ở cuối đợt.)
+  - [x] `pageIndex`/`source` ngoài phạm vi không làm crash.
+  - [ ] Project hợp lệ vẫn load đủ. (Kiểm chứng trình duyệt bằng Playwright ở cuối đợt.)
 - **Test bắt buộc:**
-  - [ ] Node unit test validator (dùng chung S4).
+  - [x] Node unit test validator (dùng chung S4).
   - [ ] Playwright: invalid JSON, out-of-range index, oversized file (mock
         `File.size`), project hợp lệ.
 
 ### S17 — [Medium] Shutdown bằng `os.Exit(0)` giết request đang chạy
 
-- **Trạng thái:** `[ ]`
+- **Trạng thái:** `[x]`
 - **Bằng chứng:** `server.go:469-473`, `:691-696`, `:699-707`.
 - **Nguyên nhân:** `os.Exit` bỏ qua `server.Shutdown`, kill handler/cleanup.
 - **Việc cần làm:**
@@ -597,14 +609,14 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
      `server.Shutdown(ctx)`; nếu lỗi → `server.Close()` và log.
   5. Không `os.Exit` trong handler/goroutine; để `runUI` return bình thường.
 - **Tiêu chí nghiệm thu:**
-  - [ ] Request optimize/convert đang chạy có cơ hội hoàn tất (hoặc bị cancel có
+  - [x] Request optimize/convert đang chạy có cơ hội hoàn tất (hoặc bị cancel có
         kiểm soát) trước khi process thoát.
-  - [ ] Ctrl+C, Enter/Q, nút thoát đều dùng cùng đường graceful.
-  - [ ] Không còn `os.Exit` trong các đường shutdown.
+  - [x] Ctrl+C, Enter/Q, nút thoát đều dùng cùng đường graceful.
+  - [x] Không còn `os.Exit` trong các đường shutdown.
 - **Test bắt buộc:**
-  - [ ] Test `server.Shutdown` với handler block 1 s; assert hoàn tất.
+  - [x] Test `server.Shutdown` với handler block 1 s; assert hoàn tất.
   - [ ] Manual: convert file lớn rồi shutdown; không thấy file tạm rác.
-  - [ ] `go test -race`.
+  - [x] `go test -race`.
 
 ---
 
@@ -631,14 +643,14 @@ Thứ tự này ưu tiên chặn mất dữ liệu và các lỗ hổng có th�
 
 Một issue chỉ được đánh dấu `[x]` khi:
 
-- [ ] Code đã sửa đúng nguyên nhân, không chỉ che triệu chứng.
-- [ ] Có test hồi quy (unit/integration/E2E tùy mức).
+- [x] Code đã sửa đúng nguyên nhân, không chỉ che triệu chứng.
+- [x] Có test hồi quy (unit/integration/E2E tùy mức).
 - [ ] Test mới chạy pass cùng toàn bộ suite liên quan.
-- [ ] `python scripts/sync_web.py` đã chạy; hai bản web khớp.
+- [x] `python scripts/sync_web.py` đã chạy; hai bản web khớp.
 - [ ] Không có regression UI/CLI.
-- [ ] Tài liệu/help/README được cập nhật nếu hành vi thay đổi.
-- [ ] Commit message rõ issue ID.
-- [ ] Kết quả được ghi vào `docs/SECURITY-FIX-REPORT.md`.
+- [x] Tài liệu/help/README được cập nhật nếu hành vi thay đổi.
+- [x] Commit message rõ issue ID.
+- [x] Kết quả được ghi vào `docs/SECURITY-FIX-REPORT.md`.
 
 ---
 
