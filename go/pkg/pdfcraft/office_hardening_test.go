@@ -7,18 +7,25 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestLibreOfficeArgsHardened(t *testing.T) {
-	args := libreOfficeArgs("/tmp/prof ile", "/tmp/out", []string{"a.docx", "b.xlsx"})
+	profileDir := filepath.Join(t.TempDir(), "prof ile")
+	outDir := filepath.Join(t.TempDir(), "out")
+	args := libreOfficeArgs(profileDir, outDir, []string{"a.docx", "b.xlsx"})
 	joined := strings.Join(args, " ")
 
-	// Profile tạm, URL-encode đúng (dấu cách → %20).
-	if !strings.Contains(joined, "-env:UserInstallation=file:///tmp/prof%20ile") {
-		t.Errorf("thiếu -env:UserInstallation URL-encode: %v", args)
+	// Profile tạm, URL-encode đúng (dấu cách → %20), luôn đủ 3 slash
+	// (file:///C:/... trên Windows, file:///tmp/... trên Unix).
+	if !strings.Contains(joined, "-env:UserInstallation=file:///") {
+		t.Errorf("thiếu -env:UserInstallation file URL 3 slash: %v", args)
+	}
+	if !strings.Contains(joined, "prof%20ile") {
+		t.Errorf("profile URL chưa encode dấu cách: %v", args)
 	}
 	// Flag hardening theo checklist S13.
 	for _, f := range []string{"--headless", "--norestore", "--nolockcheck",
@@ -27,20 +34,32 @@ func TestLibreOfficeArgsHardened(t *testing.T) {
 			t.Errorf("thiếu flag %s: %v", f, args)
 		}
 	}
-	// Không dùng profile người dùng: profile arg phải là /tmp/prof ile đã cho,
-	// không chứa thư mục home.
-	if home, _ := os.UserHomeDir(); home != "" && strings.Contains(joined, home) {
+	// Không dùng profile người dùng: profile arg phải là profileDir đã cho,
+	// không chứa thư mục home (trừ khi t.TempDir nằm trong home trên Windows).
+	if home, _ := os.UserHomeDir(); home != "" && !strings.HasPrefix(filepath.Clean(profileDir), filepath.Clean(home)) && strings.Contains(joined, home) {
 		t.Errorf("args chứa home dir (profile người dùng?): %v", args)
 	}
-	if !strings.Contains(joined, "--convert-to pdf --outdir /tmp/out a.docx b.xlsx") {
+	if !strings.Contains(joined, "--convert-to pdf --outdir "+outDir+" a.docx b.xlsx") {
 		t.Errorf("convert args sai thứ tự/nội dung: %v", args)
 	}
 }
 
 func TestLibreOfficeProfileArgEncoding(t *testing.T) {
-	arg := libreOfficeProfileArg("/tmp/a b/c")
-	if arg != "-env:UserInstallation=file:///tmp/a%20b/c" {
-		t.Errorf("arg = %q", arg)
+	dir := filepath.Join(t.TempDir(), "a b", "c")
+	arg := libreOfficeProfileArg(dir)
+	if !strings.HasPrefix(arg, "-env:UserInstallation=file:///") {
+		t.Errorf("arg thiếu file:/// (Windows file://C: là lỗi): %q", arg)
+	}
+	if strings.Contains(arg, "file://C:") || strings.Contains(arg, "file://D:") {
+		t.Errorf("arg có host sai thay vì đường dẫn tuyệt đối: %q", arg)
+	}
+	if !strings.Contains(arg, "a%20b/c") {
+		t.Errorf("arg chưa encode dấu cách: %q", arg)
+	}
+	if runtime.GOOS == "windows" {
+		if !regexp.MustCompile(`^\-env:UserInstallation=file:///[A-Za-z]:/`).MatchString(arg) {
+			t.Errorf("arg Windows phải là file:///<ổ>:/..., nhận %q", arg)
+		}
 	}
 }
 
@@ -212,6 +231,10 @@ func main() {
 		if strings.HasPrefix(a, "-env:UserInstallation=") {
 			profile = strings.TrimPrefix(a, "-env:UserInstallation=")
 			profile = strings.TrimPrefix(profile, "file://")
+			// File URL Windows: /C:/Users/... → C:/Users/...
+			if len(profile) >= 3 && profile[0] == '/' && profile[2] == ':' {
+				profile = profile[1:]
+			}
 		}
 	}
 
@@ -301,10 +324,14 @@ func TestConvertOfficeToPdfFakeEngine(t *testing.T) {
 			profileArg = tok
 		}
 	}
-	if !strings.HasPrefix(profileArg, "-env:UserInstallation=file://") {
-		t.Errorf("argv thiếu -env:UserInstallation:\n%s", argv)
+	if !strings.HasPrefix(profileArg, "-env:UserInstallation=file:///") {
+		t.Errorf("argv thiếu -env:UserInstallation file URL 3 slash:\n%s", argv)
 	}
-	profilePath := strings.TrimPrefix(strings.TrimPrefix(profileArg, "-env:UserInstallation=file://"), "file://")
+	profilePath := strings.TrimPrefix(profileArg, "-env:UserInstallation=file://")
+	// Windows: file:///C:/... → C:/... trước khi so sánh path.
+	if runtime.GOOS == "windows" && len(profilePath) >= 3 && profilePath[0] == '/' && profilePath[2] == ':' {
+		profilePath = profilePath[1:]
+	}
 	if home, _ := os.UserHomeDir(); home != "" && strings.Contains(profilePath, ".config/libreoffice") {
 		t.Errorf("profile trỏ vào profile người dùng: %s", profilePath)
 	}

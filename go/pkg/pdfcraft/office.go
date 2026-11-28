@@ -74,8 +74,21 @@ func writeLibreOfficeProfile(profileDir string) error {
 
 // libreOfficeProfileArg trả về -env:UserInstallation=file:///<profile>
 // (URL-encode đúng trên Windows nhờ net/url).
+//
+// Đường dẫn Windows dạng "C:/Users/..." không có slash đầu sẽ khiến
+// url.URL.String() sinh "file://C:/Users/..." (host = "C:", sai chuẩn file
+// URL) và LibreOffice bỏ qua profile tạm, quay về profile người dùng. Luôn
+// thêm slash đầu để có "file:///C:/Users/..." trên mọi nền tảng.
 func libreOfficeProfileArg(profileDir string) string {
-	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(profileDir)}
+	abs, err := filepath.Abs(profileDir)
+	if err != nil {
+		abs = profileDir
+	}
+	slashPath := filepath.ToSlash(abs)
+	if !strings.HasPrefix(slashPath, "/") {
+		slashPath = "/" + slashPath
+	}
+	u := &url.URL{Scheme: "file", Path: slashPath}
 	return "-env:UserInstallation=" + u.String()
 }
 

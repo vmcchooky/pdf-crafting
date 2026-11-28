@@ -418,6 +418,13 @@
     profile mặc định.
   - Arg profile: `-env:UserInstallation=file:///<profile>` qua `net/url`
     (`libreOfficeProfileArg`, URL-encode đúng trên Windows).
+    **Follow-up (28/11):** trên Windows, đường dẫn `C:/Users/...` không có
+    slash đầu khiến `url.URL.String()` sinh `file://C:/Users/...` (host =
+    `"C:"` — sai chuẩn file URL) và LibreOffice bỏ qua profile tạm, quay về
+    profile người dùng. `libreOfficeProfileArg` giờ luôn `filepath.Abs` rồi
+    thêm slash đầu khi thiếu → `file:///C:/Users/...` trên mọi nền tảng.
+    Test thêm: case đường dẫn Windows relative + absolute luôn sinh URL có
+    3 slash.
   - Flag: `--headless --norestore --nolockcheck --nodefault
     --nofirststartwizard --nologo` (5 flag đầu theo checklist, `--nologo`
     thêm theo docling) — dựng bởi hàm thuần `libreOfficeArgs` để test được.
@@ -634,6 +641,10 @@
   gồm test đọc 2 dòng stdin liên tiếp). Lưu ý môi trường: `gofmt -l .` trên
   Windows flag file chưa sửa do `core.autocrlf=true` (working tree CRLF),
   CI checkout LF nên sạch — không chạy `gofmt -w`.
+- Follow-up S13 (28/11, máy Windows): `libreOfficeProfileArg` thêm slash đầu
+  cho đường dẫn Windows; `go test ./pkg/pdfcraft/` pass (11.7s, gồm test
+  mới cho URL 3 slash); full suite + `GOOS=linux go build` chạy ở Task 1
+  Step 5 (xem progress ledger).
 
 **Bộ test cuối đợt (sau S15, trước khi mở PR):**
 - `cd go; gofmt -w .` → sạch (`gofmt -l` không output); `go vet ./...` pass;
