@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/xml"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -177,34 +179,90 @@ func writeMinimalOfficeFixtures(t *testing.T) []string {
 	return paths
 }
 
-// fakeOfficeEngine ghi một engine shell giả: log argv, copy xcu của profile
+// fakeOfficeEngine ghi một engine Go giả: log argv, copy xcu của profile
 // tạm ra ngoài để test assert, và tạo PDF giả cho mỗi file input.
+// Cross-platform (Windows + Unix).
 func writeFakeOfficeEngine(t *testing.T, argsLog, xcuCopy, samplePDF string) string {
 	t.Helper()
-	script := `#!/bin/sh
-echo "$@" > "$FAKE_ARGS_LOG"
-outdir=""; profile=""; prev=""
-for a in "$@"; do
-  case "$prev" in --outdir) outdir="$a";; esac
-  case "$a" in -env:UserInstallation=*) profile="${a#-env:UserInstallation=}"; profile="${profile#file://}";; esac
-  prev="$a"
-done
-if [ -n "$profile" ] && [ -f "$profile/user/registrymodifications.xcu" ]; then cp "$profile/user/registrymodifications.xcu" "$FAKE_XCU_COPY"; fi
-for f in "$@"; do
-  case "$f" in
-    *.docx|*.xlsx|*.pptx|*.doc|*.xls|*.ppt|*.odt|*.ods|*.odp|*.rtf|*.csv)
-      stem=$(basename "$f"); stem=${stem%.*}; cp "$FAKE_SAMPLE_PDF" "$outdir/$stem.pdf";;
-  esac
-done
+	// Write Go source for fake engine.
+	goSrc := `package main
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+func main() {
+	argsLog := os.Getenv("FAKE_ARGS_LOG")
+	xcuCopy := os.Getenv("FAKE_XCU_COPY")
+	samplePDF := os.Getenv("FAKE_SAMPLE_PDF")
+
+	// Log all arguments.
+	if err := os.WriteFile(argsLog, []byte(strings.Join(os.Args[1:], " ")), 0644); err != nil {
+		os.Exit(1)
+	}
+
+	outdir := ""
+	profile := ""
+	for i, a := range os.Args[1:] {
+		if a == "--outdir" && i+1 < len(os.Args[1:]) {
+			outdir = os.Args[i+2]
+		}
+		if strings.HasPrefix(a, "-env:UserInstallation=") {
+			profile = strings.TrimPrefix(a, "-env:UserInstallation=")
+			profile = strings.TrimPrefix(profile, "file://")
+		}
+	}
+
+	if profile != "" {
+		xcuPath := filepath.Join(profile, "user", "registrymodifications.xcu")
+		if _, err := os.Stat(xcuPath); err == nil {
+			data, _ := os.ReadFile(xcuPath)
+			os.WriteFile(xcuCopy, data, 0644)
+		}
+	}
+
+	exts := map[string]bool{
+		".docx": true, ".xlsx": true, ".pptx": true,
+		".doc": true, ".xls": true, ".ppt": true,
+		".odt": true, ".ods": true, ".odp": true,
+		".rtf": true, ".csv": true,
+	}
+
+	for _, f := range os.Args[1:] {
+		ext := strings.ToLower(filepath.Ext(f))
+		if exts[ext] && outdir != "" {
+			stem := filepath.Base(f)
+			stem = strings.TrimSuffix(stem, ext)
+			dst := filepath.Join(outdir, stem+".pdf")
+			data, _ := os.ReadFile(samplePDF)
+			os.WriteFile(dst, data, 0644)
+		}
+	}
+}
 `
-	path := filepath.Join(t.TempDir(), "fake-soffice.sh")
-	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "fake_engine.go")
+	if err := os.WriteFile(srcPath, []byte(goSrc), 0644); err != nil {
 		t.Fatal(err)
 	}
+
+	binName := "fake-soffice"
+	if runtime.GOOS == "windows" {
+		binName += ".exe"
+	}
+	binPath := filepath.Join(tmpDir, binName)
+
+	cmd := exec.Command("go", "build", "-o", binPath, srcPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build fake engine: %v\n%s", err, out)
+	}
+
 	t.Setenv("FAKE_ARGS_LOG", argsLog)
 	t.Setenv("FAKE_XCU_COPY", xcuCopy)
 	t.Setenv("FAKE_SAMPLE_PDF", samplePDF)
-	return path
+	return binPath
 }
 
 func TestConvertOfficeToPdfFakeEngine(t *testing.T) {
@@ -250,7 +308,15 @@ func TestConvertOfficeToPdfFakeEngine(t *testing.T) {
 	if home, _ := os.UserHomeDir(); home != "" && strings.Contains(profilePath, ".config/libreoffice") {
 		t.Errorf("profile trỏ vào profile người dùng: %s", profilePath)
 	}
-	if tmp := os.TempDir(); !strings.HasPrefix(profilePath, tmp) {
+	// Normalize paths for comparison (Windows: case-insensitive, handle separators).
+	tmp := os.TempDir()
+	normProfile := filepath.Clean(profilePath)
+	normTmp := filepath.Clean(tmp)
+	if runtime.GOOS == "windows" {
+		normProfile = strings.ToLower(normProfile)
+		normTmp = strings.ToLower(normTmp)
+	}
+	if !strings.HasPrefix(normProfile, normTmp) {
 		t.Errorf("profile %s không nằm trong thư mục tạm %s", profilePath, tmp)
 	}
 	for _, f := range []string{"--headless", "--norestore", "--nolockcheck",

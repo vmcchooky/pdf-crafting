@@ -73,7 +73,11 @@ describe('pdf.js upgrade (S5)', () => {
 
   it('mở được PDF mẫu với isEvalSupported: false (worker Node)', async () => {
     const pdfjsLib = await import('../vendor/pdf.min.mjs');
-    pdfjsLib.GlobalWorkerOptions.workerSrc = path.join(ROOT, 'vendor', 'pdf.worker.min.mjs');
+    // On Windows, workerSrc must be a file:// URL
+    const workerPath = path.join(ROOT, 'vendor', 'pdf.worker.min.mjs');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = process.platform === 'win32'
+      ? 'file:///' + workerPath.replace(/\\/g, '/')
+      : workerPath;
     const bytes = new Uint8Array(fs.readFileSync(path.join(ROOT, 'e2e', 'fixtures', 'sample.pdf')));
     const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
     try {
